@@ -17,7 +17,8 @@ sps = fs / Rs; % = 480 samples per symbol
 delay = span * sps / 2; % delay of rcc filter 
 
 % define preamble and rccfilter
-preamble = randi([0 M-1], 32, 1);
+% preamble = randi([0 M-1], 32, 1);
+preamble = [0;1;2;3;0;1;2;3;0;1;2;3;0;1;2;3;3;2;1;0;3;2;1;0;3;2;1;0;3;2;1;0];
 rrcfilter = rcosdesign(rolloff, span, sps, 'sqrt');
 
 % generate message and encode to binary then to int [0 M-1]
