@@ -2,7 +2,7 @@ clear all
 clc
 
 fs = 48000;
-fc = 800;
+fc = 1000;
 N = 1000;
 Rs = 100; % symbol rate in baud
 
@@ -22,7 +22,7 @@ preamble = [0;1;2;3;0;1;2;3;0;1;2;3;0;1;2;3;3;2;1;0;3;2;1;0;3;2;1;0;3;2;1;0];
 rrcfilter = rcosdesign(rolloff, span, sps, 'sqrt');
 
 % generate message and encode to binary then to int [0 M-1]
-msg = 'I love my girlfriend! She is so sexy!';
+msg = 'testing the system!';
 binchars = dec2bin(msg, 8); % get kx8 matrix
 bits = reshape(binchars.' - '0', [], 1); % stack vertical
 bitgroups = reshape(bits, k, [])'; % reshape by width k
@@ -46,13 +46,13 @@ header = bi2de(headerBitGroups, 'left-msb');
 % plot rrc
 [H, f] = freqz(rrcfilter, 1, 4096, fs);
 
-% figure;
-% plot(f, 20*log10(abs(H)));
-% xlabel('Frequency (Hz)');
-% ylabel('Magnitude (dB)');
-% title('RRC Filter Frequency Response');
-% grid on;
-% xlim([0 Rs]);  % zoom to one symbol rate worth
+figure;
+plot(f, 20*log10(abs(H)));
+xlabel('Frequency (Hz)');
+ylabel('Magnitude (dB)');
+title('RRC Filter Frequency Response');
+grid on;
+xlim([0 3*Rs]);  % zoom to one symbol rate worth
 
 
 phaseshift = pi/M;
@@ -113,8 +113,8 @@ disp("Tx done");
 
 %receive
 
-[rx, fs] = audioread("bpsk_tx.wav");
-% rx = txNoise;
+% [rx, fs] = audioread("bpsk_tx.wav");
+rx = txNoise;
 
 % figure(2);
 % clf
@@ -142,6 +142,9 @@ rxAligned = rxFiltered(start:end);
 
 timingOffset = 0;
 rxSymbols = rxAligned(1:sps:end);
+rxPreamble = rxSymbols(1:length(preambleSymbols));
+
+
 rxSymbols = rxSymbols(length(preambleSymbols)+1:end);
 rxHeader = rxSymbols(1:8);
 rxPayload = rxSymbols(9:end);
