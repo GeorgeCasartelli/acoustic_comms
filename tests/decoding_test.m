@@ -1,4 +1,4 @@
-clear all 
+ clear all 
 clc
 
 %{
@@ -54,9 +54,14 @@ preambleRef = preambleRef(delay+1:end-delay); %
 %audio recorder
 
 recorder = audiorecorder(fs,16,1);
-recordDuration = 8;
+recordDuration = 16;
 recordblocking(recorder, recordDuration);
 rx = getaudiodata(recorder);
+
+%get text file data for verification later
+file = fopen("textfile.txt", "r");
+testData = fscanf(file, "%c");
+fclose(file);
 
 % read audio file
 % [rx, fs] = audioread("untitled.wav");
@@ -115,10 +120,16 @@ if length(dataOut) < rxDataLength
     dataOut = [dataOut; zeros(rxDataLength - length(dataOut), 1)]; % pad output if too short
 end
 
-% len = min(length(dataOut), length(dataIn));
+rxBits = de2bi(dataOut, k, 'left-msb');
+rxBits = reshape(rxBits.',1,[]);
 
-% BER = sum(dataOut(1:len) ~= dataIn(1:len)) / len;
-% disp(BER)
+testChars = uint8(testData);
+testBits = de2bi(testChars, 8, 'left-msb');
+testBits = reshape(testBits.', 1, []);
+
+len = min(length(rxBits), length(testBits));
+BER = sum(dataOut(1:len) ~= testData(1:len)) / len;
+disp(BER);
 
 output = de2bi(dataOut, 'left-msb');
 % numChars = floor(size(output, 1) / 8);
