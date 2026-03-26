@@ -28,7 +28,7 @@ which rotates signal back to expected 4 quadrants
 
 fs = 48000;
 fc = 1000;
-Rs = 100; % symbol rate in baud
+Rs = 500; % symbol rate in baud
 
 % symbol vars
 M = 4;
@@ -51,7 +51,15 @@ preambleSymbols = pskmod(preamble,M,phaseshift); % modulate preamble into qpsk
 preambleRef = upfirdn(preambleSymbols, rrcfilter, sps, 1); 
 preambleRef = preambleRef(delay+1:end-delay); % 
 
-[rx, fs] = audioread("untitled.wav");
+%audio recorder
+
+recorder = audiorecorder(fs,16,1);
+recordDuration = 8;
+recordblocking(recorder, recordDuration);
+rx = getaudiodata(recorder);
+
+% read audio file
+% [rx, fs] = audioread("untitled.wav");
 % rx = txNoise;
 
 % figure(2);
@@ -99,7 +107,7 @@ disp(rxDataLength);
 
 
 rxPayload = rxSymbols(headerSymbols+1:headerSymbols+rxDataLength);
-scatterplot(rxPayload);
+% scatterplot(rxPayload);
 % expectedSymbols = length(dataIn);
 dataOut = pskdemod(rxPayload, M, phaseshift);
 
