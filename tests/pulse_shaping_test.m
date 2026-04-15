@@ -4,7 +4,7 @@ clc
 fs = 48000;
 fc = 1000;
 N = 1000;
-Rs = 100; % symbol rate in baud
+Rs = 500; % symbol rate in baud
 
 % symbol vars
 M = 4;
@@ -22,7 +22,10 @@ preamble = [0;1;2;3;0;1;2;3;0;1;2;3;0;1;2;3;3;2;1;0;3;2;1;0;3;2;1;0;3;2;1;0];
 rrcfilter = rcosdesign(rolloff, span, sps, 'sqrt');
 
 % generate message and encode to binary then to int [0 M-1]
-msg = 'testing the system!';
+msg = 'bonjourno my name is giorgio. ';
+file = fopen("textfile.txt","r")';
+% msg = fscanf(file, "%c");
+fclose(file);
 binchars = dec2bin(msg, 8); % get kx8 matrix
 bits = reshape(binchars.' - '0', [], 1); % stack vertical
 bitgroups = reshape(bits, k, [])'; % reshape by width k
@@ -46,13 +49,13 @@ header = bi2de(headerBitGroups, 'left-msb');
 % plot rrc
 [H, f] = freqz(rrcfilter, 1, 4096, fs);
 
-figure;
-plot(f, 20*log10(abs(H)));
-xlabel('Frequency (Hz)');
-ylabel('Magnitude (dB)');
-title('RRC Filter Frequency Response');
-grid on;
-xlim([0 3*Rs]);  % zoom to one symbol rate worth
+% figure;
+% plot(f, 20*log10(abs(H)));
+% xlabel('Frequency (Hz)');
+% ylabel('Magnitude (dB)');
+% title('RRC Filter Frequency Response');
+% grid on;
+% xlim([0 3*Rs]);  % zoom to one symbol rate worth
 
 
 phaseshift = pi/M;
