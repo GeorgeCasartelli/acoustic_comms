@@ -59,6 +59,27 @@ qpskSigFull = [preambleSignal, qpskSig];
 
 tx_bb = ofdmmod(qpskSigFull, nfft, cplen, nullIdx);
 
+symbolLen = nfft + cplen;
+roll = 16; % try 8–32 samples
+
+win = ones(symbolLen,1);
+rc = (0:roll-1)'/roll;
+taper = 0.5*(1-cos(pi*rc)); % raised cosine
+
+win(1:roll) = taper;
+win(end-roll+1:end) = flipud(taper);
+
+% apply per symbol
+tx_bb_win = tx_bb;
+numSyms = floor(length(tx_bb)/symbolLen);
+
+for i = 1:numSyms
+    idx = (i-1)*symbolLen + (1:symbolLen);
+    tx_bb_win(idx) = tx_bb(idx).*win;
+end
+
+tx_bb = tx_bb_win;
+
 % add silence to start
 silenceDuration = 2;
 silenceSamples = round(silenceDuration * fs);
