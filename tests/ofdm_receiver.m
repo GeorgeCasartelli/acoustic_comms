@@ -2,15 +2,15 @@ clear all; clc;
 
 M = 4;
 k = log2(M);
-nfft = 1024;
-cplen = 32;
+nfft = 2048;
+cplen = 1024;
 fs = 48000;
-fc = 6000;
+fc = 10000;
 
 %% ---- CARRIER DEFINITIONS ----
 
-numActiveCarriers = 42;
-pilotSpacing = 10;
+numActiveCarriers = 100;
+pilotSpacing = 5;
 
 % indices for first and second half of points
 activeCarriers = ((nfft/2) - (numActiveCarriers/2) : (nfft/2) + (numActiveCarriers/2)).';
@@ -38,7 +38,7 @@ nFrames = ceil(numel(bits) / bitsPerFrame);
 paddedBits = [bits; zeros(nFrames*bitsPerFrame - totalBits, 1)]; % pad to make square. 
 bitgroups = reshape(paddedBits, k, [])'; % reshape by width k
 inputSymbols = bi2de(bitgroups, 'left-msb'); % conv to int
-
+dataIn = inputSymbols;
 
 pilots = repmat(pskmod(0,M,pi/4),length(pilotIdx),nFrames+1);
 
@@ -76,7 +76,6 @@ rx_baseband = filter(b, a, rx_mixed);
 
 preamble_bb = ofdmmod(preambleData, nfft, cplen, nullIdx, pilotIdx, pilots(:,1)); % make a preamble reference
 
-% rx_baseband = rx_mixed;
 
 %% ---- ALIGN ----
 [xc, lags] = xcorr(rx_baseband, preamble_bb);
@@ -99,9 +98,22 @@ rxDataSyms = x1(:, 2:end); % get payload
 disp(preamble);
 disp(pskdemod(rxPreamble, M,pi/4));
 
+% txPilotSymbols = pilots(:, 2:end);
+txPilotSymbols = pilots;
+
+nSyms = size(txPilotSymbols, 2);
+nDataSyms = min(size(rxDataSyms, 2), nFrames);
+
+x1_equalised = zeros(length(dataIdx), nDataSyms);
+
+for sym = 1:nDataSyms
+    H_pilots = rxPilots(:, sym+1) ./ pilots(:, sym+1);
+    H_interp = interp1(pilotIdx, H_pilots, dataIdx, 'linear', 'extrap');
+    x1_equalised(:, sym) = rxDataSyms(:, sym) ./ H_interp;
+end
 % un rotate the signal using known preamble and received
-H = rxPreamble ./ preambleData; 
-x1_equalised = rxDataSyms ./ H;
+% H = rxPreamble ./ preambleData; 
+% x1_equalised = rxDataSyms ./ H;
 
 rxData = pskdemod(x1_equalised, M, pi/4);
 
@@ -114,12 +126,44 @@ cdScope(x1_equalised(:));
 
 drawnow;
 
-output = de2bi(rxData(:), k, 'left-msb');
-outputBits = reshape(output.', [], 1);
-finalBits = outputBits(1:totalBits);
+rawData = de2bi(rxData(:), k, 'left-msb');
+allRxBits = reshape(rawData.', [], 1);
 
-outputBits_reshape = reshape(finalBits, 8, [])';
-charArray = char(outputBits_reshape + '0');
-outputText = bin2dec(charArray).';
+if length(allRxBits) >= 16
+    recoveredLen = bi2de(allRxBits(1:16)', 'left-msb');
+    fprintf('Header decoded! Message length: %d bits\n', recoveredLen);
+    
+    % 3. Grab the actual message bits (skipping the 16-bit header)
+    if length(allRxBits) >= (16 + recoveredLen)
+        finalBits = allRxBits(17 : 17 + recoveredLen - 1);
+        
+        % 4. Convert to text
+        outputBits_reshape = reshape(finalBits, 8, [])';
+        charArray = char(outputBits_reshape + '0');
+        outputText = bin2dec(charArray).';
+        fprintf('Recovered: %s\n', char(outputText));
+        
+        % 5. Proper bit-level BER
+        bitErrors = sum(bits ~= finalBits);
+        actualBER = bitErrors / totalBits;
+        fprintf('Bit Error Rate (BER): %.4f\n', actualBER);
+    else
+        disp('Error: Not enough bits received to match header length.');
+    end
+else
+    disp('Error: Could not even decode the 16-bit header.');
+end
 
-fprintf('Recovered: %s\n', char(outputText));
+% outputBits = reshape(rawData.', [], 1);
+% finalBits = outputBits(1:totalBits);
+% 
+% outputBits_reshape = reshape(finalBits, 8, [])';
+% charArray = char(outputBits_reshape + '0');
+% outputText = bin2dec(charArray).';
+% 
+% fprintf('Recovered: %s\n', char(outputText));
+% 
+% len = min(length(rxData), length(dataIn));
+% 
+% BER = sum(rxData(1:len) ~= dataIn(1:len)) / len;
+% disp(BER);
