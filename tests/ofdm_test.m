@@ -2,14 +2,14 @@ clear all; clc;
 
 M = 4;
 k = log2(M);
-nfft = 512;
-cplen = 32;
+nfft = 2048;
+cplen = 1024;
 fs = 48000;
-fc = 6000;
+fc = 10000;
 
 % define active carriers around the midpoint of nfft val
-numActiveCarriers = 42;
-pilotSpacing = 10;
+numActiveCarriers = 100;
+pilotSpacing = 5;
 
 % indices for first and second half of points
 activeCarriers = ((nfft/2) - (numActiveCarriers/2) : (nfft/2) + (numActiveCarriers/2)).';
@@ -21,10 +21,10 @@ dataIdx = setdiff(activeCarriers, pilotIdx);
 nullIdx = setdiff(1:nfft, activeCarriers).'; % define null carrier idx
 
 
-msg = 'its really late and i need to go eat but the message gets corrupted because the receiver doesnt know how long the message is in the slightest. really not ideal';
-% file = fopen("textfile.txt","r")';
-% msg = fscanf(file, "%c");
-% fclose(file);
+% msg = 'bass is really cool yo i swear yo';
+file = fopen("textfile.txt","r")';
+msg = fscanf(file, "%c");
+fclose(file);
 
 
 constSym = pskmod((0:M-1), M, pi/4); 
@@ -41,9 +41,18 @@ binchars = dec2bin(msg, 8);
 bits = reshape(binchars.' - '0', [], 1); 
 totalBits = numel(bits); % will be included in packet header eventually
 
+% header
+headerBits = de2bi(totalBits, 16, 'left-msb').';
+
+% allBits = [ headerBits; headerBits; bits ];
+allBits = [ headerBits; bits ];
+
 bitsPerFrame = length(dataIdx) * k;
-nFrames = ceil(numel(bits) / bitsPerFrame);
-paddedBits = [bits; zeros(nFrames*bitsPerFrame - totalBits, 1)]; % pad to make square. 
+nFrames = ceil(numel(allBits) / bitsPerFrame);
+requiredTotalBits = nFrames * bitsPerFrame;
+
+paddedBits = [allBits; zeros(requiredTotalBits - numel(allBits), 1)]; % pad to make square. 
+
 bitgroups = reshape(paddedBits, k, [])'; % reshape by width k
 inputSymbols = bi2de(bitgroups, 'left-msb'); % conv to int
 
@@ -52,8 +61,10 @@ preamble = mod(0:numActiveCarriers-1, 4).';
 preambleSignal = pskmod(preamble, M, pi/4);
 
 
+
+
 % organise data into carriers x symbols matrix
-qpskSig = reshape(pskmod(inputSymbols, M, pi/4), length(dataIdx), []);  
+qpskSig = reshape(pskmod(inputSymbols, M, pi/4), length(dataIdx), nFrames);  
 preambleData = preambleSignal(1:length(dataIdx));
 
 qpskSigFull = [preambleData, qpskSig];
@@ -97,7 +108,8 @@ txPassband = txPassband / max(abs(txPassband)) * 0.9;
 txPassband = [silence; txPassband];
 
 % sprinkle some wgn
-signal = awgn(txPassband, 50);
+% signal = awgn(txPassband, 50);
+signal = txPassband;
 audiowrite("ofdm_signal.wav", signal, fs);
 disp("Tx done");
 
@@ -129,6 +141,9 @@ rxTrimmed = rxAligned(1 : numSymbolsReceived * symbolLen);
 rxPreamble = x1(:, 1); % get first symbol (preamble) 
 rxDataSyms = x1(:, 2:end); % get payload
 
+nSyms = size(pilots, 2);
+nDataSyms = min(size(rxDataSyms, 2), nFrames);
+
 disp(preamble);
 disp(pskdemod(rxPreamble, M,pi/4));
 
@@ -156,15 +171,53 @@ cdScope(x1_equalised(:));
 
 drawnow;
 
-output = de2bi(rxData(:), k, 'left-msb');
-outputBits = reshape(output.', [], 1);
-finalBits = outputBits(1:totalBits);
+%% ---- DATA RECOVERY WITH HEADER (RX) ----
 
-outputBits_reshape = reshape(finalBits, 8, [])';
-charArray = char(outputBits_reshape + '0');
-outputText = bin2dec(charArray).';
+% symbols convert bak to bits
+rawBits = de2bi(rxData(:), k, 'left-msb');
+allRxBits = reshape(rawBits.', [], 1);
 
-fprintf('Recovered: %s\n', char(outputText));
+
+if length(allRxBits) >= 16
+    h1 = allRxBits(1:16);
+    % h2 = allRxBits(17:32);
+    % h3 = allRxBits(33:48);
+    % headerVote = round((h1 + h2 + h3) / 3);
+    headerVote = h1;
+    recoveredLen = bi2de(headerVote', 'left-msb'); 
+    fprintf('Header given message length: %d bits\n', recoveredLen);
+    
+    % grab message bits
+    if length(allRxBits) >= (16 + recoveredLen)
+        finalBits = allRxBits(17 : 17 + recoveredLen - 1);
+        
+        % conv back to text
+        outputBits_reshape = reshape(finalBits, 8, [])';
+        charArray = char(outputBits_reshape + '0');
+        outputText = bin2dec(charArray).';
+        fprintf('Recovered: %s\n', char(outputText));
+        
+        % calc ber
+        bitErrors = sum(bits ~= finalBits);
+        actualBER = bitErrors / totalBits;
+        fprintf('Bit Error Rate (BER): %.4f\n', actualBER);
+    else
+        disp('Error: Length mismatch');
+    end
+else
+    disp('Error: Couldnt decode header');
+end
+
+
+% output = de2bi(rxData(:), k, 'left-msb');
+% outputBits = reshape(output.', [], 1);
+% finalBits = outputBits(1:totalBits);
+% 
+% outputBits_reshape = reshape(finalBits, 8, [])';
+% charArray = char(outputBits_reshape + '0');
+% outputText = bin2dec(charArray).';
+% 
+% fprintf('Recovered: %s\n', char(outputText));
 
 
 % figure('Name', 'Power Spectral Density');
