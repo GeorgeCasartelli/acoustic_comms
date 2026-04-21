@@ -59,7 +59,7 @@ inputSymbols = bi2de(bitgroups, 'left-msb'); % conv to int
 dataIn = inputSymbols;
 
 % create pilot data ( symbol 00 ) based on nFrames
-pilots = repmat(pskmod(0,M,pi/4),length(pilotIdx),nFrames+1);
+% pilots = repmat(pskmod(0,M,pi/4),length(pilotIdx),nFrames+1);
 
 
 %% --== CONTSTELLATION ==--
@@ -78,6 +78,7 @@ rx = getaudiodata(recorder);
 
 % [rx, fs] = audioread("ofdm_signal.wav");
 
+
 %% --== RX ==--
 preamble = mod(0:numActiveCarriers-1, 4).';
 preambleSignal = pskmod(preamble, M, pi/4);
@@ -93,22 +94,48 @@ lpCutoff = 2000; % may need adjusting
 rx_baseband = filter(b, a, rx_mixed);
 
 % rx_baseband = rx_mixed;
+pilotRef = pskmod(0,M,pi/4) * ones(length(pilotIdx), 1);
+preamble_bb = ofdmmod(preambleData, nfft, cplen, nullIdx, pilotIdx, pilotRef); % make a preamble reference
 
-preamble_bb = ofdmmod(preambleData, nfft, cplen, nullIdx, pilotIdx, pilots(:,1)); % make a preamble reference
+% %% --== ALIGN W/ PREAMBLE ==--
+% 
+% % cross correlate received with known preamble
+% [xc, lags] = xcorr(rx_baseband, preamble_bb);
+% [~, idx] = max(abs(xc)); 
+% start = lags(idx);
+% 
+% rxAligned = rx_baseband(start:end); % trim before preamble
+% 
+% % trim down to whole number of ofdm symbols for ofdmdemod
+% symbolLen = nfft + cplen;
+% numSymbolsReceived = floor(length(rxAligned) / symbolLen);
+% rxTrimmed = rxAligned(1 : numSymbolsReceived * symbolLen);
 
-%% --== ALIGN W/ PREAMBLE ==--
+%% --== SCHMIDL COX ==--
 
-% cross correlate received with known preamble
-[xc, lags] = xcorr(rx_baseband, preamble_bb);
-[~, idx] = max(abs(xc)); 
-start = lags(idx);
+scBits = ones(nfft/2, 1);
+scMod = pskmod(scBits, M, pi/4);
+scData = zeros(nfft,1);
+scData(2:2:nfft) = scMod;
+scTime = ifft(ifftshift(scData)) * sqrt(nfft);
+scSymbol = [scTime(end-cplen+1:end); scTime];
 
-rxAligned = rx_baseband(start:end); % trim before preamble
+halfLen = nfft/2;
+metric = zeros(length(rx_baseband), 1);
 
-% trim down to whole number of ofdm symbols for ofdmdemod
-symbolLen = nfft + cplen;
-numSymbolsReceived = floor(length(rxAligned) / symbolLen);
-rxTrimmed = rxAligned(1 : numSymbolsReceived * symbolLen);
+for n=1 : length(rx_baseband) - nfft
+
+    first = rx_baseband(n : n + halfLen - 1);
+    second = rx_baseband(n + halfLen : n + nfft - 1);
+    metric(n) = abs(sum(conj(first) .* second));
+
+end
+
+[~, timingPoint] = max(metric);
+
+start = timingPoint + length(scSymbol);
+rxAligned = rx_baseband;
+
 
 %% --== OFDM DEMOD ==--
 [x1, rxPilots] = ofdmdemod(rxTrimmed, nfft, cplen, 0, nullIdx, pilotIdx);
@@ -116,11 +143,12 @@ rxTrimmed = rxAligned(1 : numSymbolsReceived * symbolLen);
 rxPreamble = x1(:, 1); % get first symbol (preamble) 
 rxDataSyms = x1(:, 2:end); % get payload
 
-disp(preamble);
-disp(pskdemod(rxPreamble, M, pi/4));
+pilots = repmat(pskmod(0,M,pi/4), length(pilotIdx), size(rxPilots,2));
+% disp(preamble);
+% disp(pskdemod(rxPreamble, M, pi/4));
 
 nSyms = size(pilots, 2);
-nDataSyms = min(size(rxDataSyms, 2), nFrames);
+nDataSyms = min(size(rxDataSyms, 2), size(rxPilots, 2) - 1);
 x1_equalised = zeros(length(dataIdx), nDataSyms);
 
 for sym = 1:nDataSyms
@@ -141,7 +169,6 @@ rawData = de2bi(rxData(:), k, 'left-msb');
 allRxBits = reshape(rawData.', [], 1); % flatten to single bitstream
 
 if length(allRxBits) >= 16
-
     recoveredLen = bi2de(allRxBits(1:16)', 'left-msb'); % get msg length
     fprintf('Header decoded! Message length: %d bits\n', recoveredLen);
     
