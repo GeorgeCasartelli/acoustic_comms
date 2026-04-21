@@ -1,4 +1,11 @@
 clear all; clc;
+%{
+
+OFDM SIGNAL TRANSMITTER
+
+MUST BE MATCHED WITH ofdm_receive.m
+
+%}
 
 %% --== DEFINE SIGNAL PARAMS ==--
 M = 4;
@@ -8,7 +15,7 @@ cplen = 1024;
 fs = 48000;
 fc = 10000;
 
-% carriers
+%% --== DEFINE CARRIERS ==--
 numActiveCarriers = 100;
 pilotSpacing = 5;
 
@@ -41,7 +48,7 @@ cdScope = comm.ConstellationDiagram( ...
 
 %% --== TX - QPSK ==--
 
-% translate message into symbols
+% translate message into integers 0->M-1
 binchars = dec2bin(msg, 8); 
 bits = reshape(binchars.' - '0', [], 1); % convert from ascii nums to int
 totalBits = numel(bits); 
