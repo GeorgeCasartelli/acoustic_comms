@@ -8,6 +8,7 @@ MUST BE MATCHED WITH ofdm_transmit.m
 
 %}
 
+showPlots = true;
 
 %% --== DEFINE SIGNAL PARAMS ==--
 
@@ -88,8 +89,8 @@ preambleData = preambleSignal(1:length(dataIdx));
 t_rx = (0:length(rx)-1)' /fs; % new time vector
 rx_mixed = rx .* exp(-1j*2*pi*fc*t_rx); % mix down to baseband
 
-% filter
-lpCutoff = 2000; % may need adjusting
+% filterdata
+lpCutoff = 6000; % may need adjusting
 [b, a] = butter(6, lpCutoff/(fs/2));
 rx_baseband = filter(b, a, rx_mixed);
 
@@ -97,14 +98,89 @@ rx_baseband = filter(b, a, rx_mixed);
 pilotRef = pskmod(0,M,pi/4) * ones(length(pilotIdx), 1);
 preamble_bb = ofdmmod(preambleData, nfft, cplen, nullIdx, pilotIdx, pilotRef); % make a preamble reference
 
+%% --== SCHMIDL COX DECODE ==--
+
+P = zeros(length(rx_baseband) - nfft, 1);
+E = zeros(length(rx_baseband) - nfft, 1);
+d = 0:nfft/2-1;
+
+for n = 1:length(P)
+    P(n) = sum(conj(rx_baseband(n : n + nfft/2 - 1)) .* rx_baseband(n + nfft/2 : n + nfft-1));
+end
+
+for n = 1:length(E) 
+    E(n) = sum(abs(rx_baseband(n + nfft/2 : n + nfft-1)).^2);
+end
+
+timingMetric = abs(P).^2 ./ E.^2;
+[~, scIdx] = max(timingMetric);
+
+
+deltaF = angle(P(scIdx)) * fs / (pi*nfft);
+% % deltaF = 0;
+t_rx = (0:length(rx_baseband)-1)' / fs;
+rxCorrected = rx_baseband .* exp(-1j * 2 * pi * deltaF * t_rx);
+% 
+
+symbolLen = nfft + cplen;
+
+bestMetric = 0;
+bestOffset = 0;
+
+for offset = 0 : symbolLen
+    testStart = scIdx + offset;
+    
+    rxTest = rxCorrected(testStart:end);
+    
+    numSyms = floor(length(rxTest)/symbolLen);
+    if numSyms < 2
+        continue;
+    end
+    
+    rxTrim = rxTest(1:numSyms*symbolLen);
+    
+    [xTest, ~] = ofdmdemod(rxTrim, nfft, cplen, 0, nullIdx, pilotIdx);
+    
+    % measure how "clustered" it is
+    metric = mean(abs(xTest(:)).^2) / var(abs(xTest(:)));
+    
+    if metric > bestMetric
+        bestMetric = metric;
+        bestOffset = offset;
+    end
+end
+
+
+dataStart = scIdx + bestOffset;
+disp(['Best offset = ', num2str(bestOffset)]);
+
+% % searchRange = scIdx : scIdx + (nfft + cplen) * 2;
+% % [xc, lags] = xcorr(rxCorrected(searchRange), preamble_bb);
+% % [~, localIdx] = max(abs(xc));
+% dataStart = scIdx + (nfft+cplen);
+% 
+% rxAligned = rxCorrected(dataStart:end);
+% 
+% % trim to be whole number of ofdm symbols
+% symbolLen = nfft + cplen;
+% numSymbolsReceived = floor(length(rxAligned) / symbolLen);
+% rxTrimmed = rxAligned(1 : numSymbolsReceived * symbolLen);
+
+if showPlots
+    plot(timingMetric);
+    title('Schmidl-Cox Timing Metric');
+    xlabel('Sample index');
+    ylabel('timingMetric');
+end
+
 %% --== ALIGN W/ PREAMBLE ==--
 
 % cross correlate received with known preamble
-[xc, lags] = xcorr(rx_baseband, preamble_bb);
+[xc, lags] = xcorr(rxCorrected, preamble_bb);
 [~, idx] = max(abs(xc)); 
-start = lags(idx);
+start = lags(idx) + length(preamble_bb);
 
-rxAligned = rx_baseband(start:end); % trim before preamble
+rxAligned = rxCorrected(start:end); % trim before preamble
 
 % trim down to whole number of ofdm symbols for ofdmdemod
 symbolLen = nfft + cplen;
@@ -119,7 +195,7 @@ rxTrimmed = rxAligned(1 : numSymbolsReceived * symbolLen);
 [x1, rxPilots] = ofdmdemod(rxTrimmed, nfft, cplen, 0, nullIdx, pilotIdx);
  
 rxPreamble = x1(:, 1); % get first symbol (preamble) 
-rxDataSyms = x1(:, 2:end); % get payload
+rxDataSyms = x1(:, 1:end); % get payload
 
 pilots = repmat(pskmod(0,M,pi/4), length(pilotIdx), size(rxPilots,2));
 % disp(preamble);
@@ -130,7 +206,7 @@ nDataSyms = min(size(rxDataSyms, 2), size(rxPilots, 2) - 1);
 x1_equalised = zeros(length(dataIdx), nDataSyms);
 
 for sym = 1:nDataSyms
-    H_pilots = rxPilots(:, sym+1) ./ pilots(:, sym+1); % channel estimate at the pilot
+    H_pilots = rxPilots(:, sym) ./ pilots(:, sym); % channel estimate at the pilot
     H_interp = interp1(pilotIdx, H_pilots, dataIdx, 'linear', 'extrap'); % interpolate est. to data subc.
     x1_equalised(:, sym) = rxDataSyms(:, sym) ./ H_interp; % apply channel correction
 end
