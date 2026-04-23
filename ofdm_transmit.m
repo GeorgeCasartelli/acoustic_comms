@@ -78,14 +78,15 @@ qpskSig = reshape(pskmod(inputSymbols, M, pi/4), length(dataIdx), nFrames);
 preambleData = preambleSignal(1:length(dataIdx)); % make the same length as data
 
 % STACK
-qpskSigFull = [preambleData, qpskSig];
+% qpskSigFull = [preambleData, qpskSig];
+qpskSigFull = qpskSig;
 
 
 
 %% --== TX - OFDM ==--
 
 % DEFINE PILOTS
-pilots = repmat(pskmod(0,M,pi/4),length(pilotIdx),nFrames+1);
+pilots = repmat(pskmod(0,M,pi/4),length(pilotIdx),nFrames); % no longer +1
 tx_ofdm = ofdmmod(qpskSigFull, nfft, cplen, nullIdx, pilotIdx, pilots);
 
 symbolLen = nfft + cplen;
@@ -109,7 +110,23 @@ for i = 1:numSyms
     tx_ofdm_win(idx) = tx_ofdm(idx).*win;
 end
 
-tx_bb = tx_ofdm_win;
+%% --== SCHMIDL COX SYNCHRO ==--
+
+scCarriers = ((nfft/2) - (numActiveCarriers/2) : 2 :(nfft/2) + (numActiveCarriers/2)).';
+scRandomData = randi([0 M-1], length(scCarriers), 1);
+scQpskData = pskmod(scRandomData, M, pi/4);
+
+scData = zeros(nfft, 1);
+scData(scCarriers) = scQpskData;
+scData = ifftshift(scData);
+
+scTimeDomain = ifft(scData)*sqrt(nfft);
+scCp = scTimeDomain(end-cplen+1:end);
+scTimeDomain = [scCp ; scTimeDomain];
+
+scTimeDomain = scTimeDomain * (rms(tx_ofdm_win) / rms(scTimeDomain));
+
+tx_bb = [ scTimeDomain; tx_ofdm_win ];
 
 %% --== TX - AUDIO PREP ==--
 
