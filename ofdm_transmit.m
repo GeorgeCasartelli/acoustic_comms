@@ -68,19 +68,6 @@ paddedBits = [allBits; zeros(requiredTotalBits - numel(allBits), 1)]; % pad to m
 bitgroups = reshape(paddedBits, k, [])'; % reshape by width k
 inputSymbols = bi2de(bitgroups, 'left-msb'); % conv to int
 
-% SCHMIDL COX
-scBits = randi([0 M-1], nfft/2, 1);
-scMod = pskmod(scBits, M, pi/4);
-
-% build symbol in frequency domain - even subcarriers only
-scData = zeros(nfft, 1);
-% scData(2:2:nfft) = scMod;
-scData(2) = 1;
-
-%conv to time domain
-scSignal = ifft(ifftshift(scData)) * sqrt(nfft);
-
-scSymbol = [scSignal(end-cplen+1:end); scSignal];
 
 % PREAMBLE
 preamble = mod(0:numActiveCarriers-1, 4).'; % length of carriers, makes one symbol
@@ -122,7 +109,7 @@ for i = 1:numSyms
     tx_ofdm_win(idx) = tx_ofdm(idx).*win;
 end
 
-tx_bb = [ scSymbol; tx_ofdm_win];
+tx_bb = tx_ofdm_win;
 
 %% --== TX - AUDIO PREP ==--
 
