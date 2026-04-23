@@ -137,24 +137,32 @@ scFreq = zeros(nfft, 1);
 
 half = (nfft/2 + 2) : (nfft/2+numActiveCarriers/2);
 
-scCarrier_pos = half(2:2:end);
+% scCarrier_pos = half(2:2:end);
+scCarrier_pos = activeCarriers(mod(activeCarriers, 2) == 0);
 
 data = pskmod(randi([0 M-1], length(scCarrier_pos), 1), M, pi/4);
 
 scFreq(scCarrier_pos) = data;
 
-scCarrier_neg = nfft - scCarrier_pos + 2;
-scFreq(scCarrier_neg) = conj(data);
+% scCarrier_neg = nfft - scCarrier_pos + 2;
+% scFreq(scCarrier_neg) = conj(data);
+
 
 scFreq(nfft/2+1) = 0;
 
 scTime = ifft(scFreq) * sqrt(nfft);
-
 scCp = scTime(end-cplen+1:end);
 scTime = [scCp; scTime];
 scTime = scTime * (rms(tx_ofdm_win) / rms(scTime));
 
-tx_bb = [ scTime * 1.2; tx_ofdm_win ];
+% tx_bb = [ scTime * 1.2; tx_ofdm_win ];
+tx_bb = [ scTime ; tx_ofdm ];
+
+half1 = scTime(cplen+1 : cplen+nfft/2);
+half2 = scTime(cplen+nfft/2+1 : cplen+nfft);
+figure;
+subplot(2,1,1); plot(real(half1)); title(' first half ');
+subplot(2,1,2); plot(real(half2)); title(' second half');
 
 %% --== TX - AUDIO PREP ==--
 
@@ -168,7 +176,7 @@ t = (0:length(tx_bb)-1)'/fs;
 
 txPassband = real(tx_bb .* exp(1j*2*pi*fc*t));
 txPassband = txPassband / max(abs(txPassband)) * 0.9;
-txPassband = [silence; txPassband]; % not necessarily needed
+% txPassband = [silence; txPassband]; % not necessarily needed
 
 % signal = awgn(txPassband, 50); % awgn if wanted
 signal = txPassband;
