@@ -112,21 +112,49 @@ end
 
 %% --== SCHMIDL COX SYNCHRO ==--
 
-scCarriers = ((nfft/2) - (numActiveCarriers/2) : 2 :(nfft/2) + (numActiveCarriers/2)).';
-scRandomData = randi([0 M-1], length(scCarriers), 1);
-scQpskData = pskmod(scRandomData, M, pi/4);
+% scCarriers = ((nfft/2) - (numActiveCarriers/2) : 2 :(nfft/2) + (numActiveCarriers/2) - 1).';
+% scBins = activeCarriers(1:2:end);
+% 
+% scRandomData = randi([0 M-1], length(scBins), 1);
+% scQpskData = pskmod(scRandomData, M, pi/4);
+% 
+% scData = zeros(nfft, 1);
+% scData(scBins) = scQpskData;
+% 
+% mirrorBins = nfft - scBins + 2;
+% scData(mirrorBins) = conj(scQpskData);
+% scData = ifftshift(scData);
+% 
+% scTime = ifft(scData)*sqrt(nfft);
+% scCp = scTime(end-cplen+1:end);
+% scTime = [scCp ; scTime];
+% 
+% scTime = scTime * (rms(tx_ofdm_win) / rms(scTime));
+% 
+% tx_bb = [ scTime * 2; tx_ofdm_win ];
 
-scData = zeros(nfft, 1);
-scData(scCarriers) = scQpskData;
-scData = ifftshift(scData);
+scFreq = zeros(nfft, 1);
 
-scTimeDomain = ifft(scData)*sqrt(nfft);
-scCp = scTimeDomain(end-cplen+1:end);
-scTimeDomain = [scCp ; scTimeDomain];
+half = (nfft/2 + 2) : (nfft/2+numActiveCarriers/2);
 
-scTimeDomain = scTimeDomain * (rms(tx_ofdm_win) / rms(scTimeDomain));
+scCarrier_pos = half(2:2:end);
 
-tx_bb = [ scTimeDomain; tx_ofdm_win ];
+data = pskmod(randi([0 M-1], length(scCarrier_pos), 1), M, pi/4);
+
+scFreq(scCarrier_pos) = data;
+
+scCarrier_neg = nfft - scCarrier_pos + 2;
+scFreq(scCarrier_neg) = conj(data);
+
+scFreq(nfft/2+1) = 0;
+
+scTime = ifft(scFreq) * sqrt(nfft);
+
+scCp = scTime(end-cplen+1:end);
+scTime = [scCp; scTime];
+scTime = scTime * (rms(tx_ofdm_win) / rms(scTime));
+
+tx_bb = [ scTime * 1.2; tx_ofdm_win ];
 
 %% --== TX - AUDIO PREP ==--
 
