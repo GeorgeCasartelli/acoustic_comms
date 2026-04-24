@@ -15,7 +15,7 @@ showPlots = true;
 M = 4;
 k = log2(M);
 nfft = 2048;
-cplen = 1024;
+cplen = 512;
 fs = 48000;
 fc = 10000;
 
@@ -25,9 +25,14 @@ numActiveCarriers = 100;
 pilotSpacing = 5;
 
 % centre around nfft/2
-activeCarriers = ((nfft/2) - (numActiveCarriers/2) : (nfft/2) + (numActiveCarriers/2)).';
+% activeCarriers = ((nfft/2) - (numActiveCarriers/2) : (nfft/2) + (numActiveCarriers/2)).';
+% activeCarriers(activeCarriers == nfft/2 + 1) = []; % remove dc 0 
 
-activeCarriers(activeCarriers == nfft/2 + 1) = []; % remove dc 0 
+halfCarriers = numActiveCarriers/2;
+posCarriers = 2 : (halfCarriers + 1);
+negCarriers = (nfft - halfCarriers + 1) : nfft;
+
+activeCarriers = [ posCarriers, negCarriers].';
 
 % define idx for pilot, data, and null carriers
 pilotIdx = activeCarriers(1:pilotSpacing:end);
@@ -72,12 +77,12 @@ cdScope = comm.ConstellationDiagram( ...
     ReferenceConstellation=constSym);
 
 %% --== RECORDER ==--
-% recorder = audiorecorder(fs,16,1);
-% recordDuration = 5;
-% recordblocking(recorder, recordDuration);
-% rx = getaudiodata(recorder);
+recorder = audiorecorder(fs,16,1);
+recordDuration = 5;
+recordblocking(recorder, recordDuration);
+rx = getaudiodata(recorder);
 
-[rx, fs] = audioread("ofdm_signal.wav");
+% [rx, fs] = audioread("ofdm_signal.wav");
 
 
 %% --== RX ==--
@@ -116,36 +121,22 @@ energyThreshold = 0.05 * max(E.^2); % only calc when signal exists
 validIdx = (E.^2) > energyThreshold; 
 timingMetric(validIdx) = abs(P(validIdx)).^2 ./ E(validIdx).^2;
 
-threshold = 0.99 * max(timingMetric);
+smoothingWindow = floor(cplen/2);
+timingMetricSmooth = movmean(timingMetric, smoothingWindow);
+
+threshold = 0.9 * max(timingMetric);
 above = timingMetric > threshold;
 risingEdges = find(diff(above) == 1);
 % add this to rx temporarily
 fallingEdges = find(diff(above) == -1);
 
-bestError = inf;
-bestOffset = 0;
-searchRange = -symbolLen : symbolLen;
-
-for offset = searchRange
-    testStart = risingEdges(1) + offset + symbolLen;
-
-    if testStart < 1 || testStart + symbolLen > length(rx_bb)
-        continue;
-    end
-
-    sym1 = rx_bb(testStart : testStart + symbolLen - 1);
-    cp = sym1(1:cplen);
-    tail = sym1(end-cplen+1:end);
-    err = norm(cp - tail);
-
-    if err < bestError
-        bestError = err;
-        bestOffset = offset;
-    end
+if isempty(risingEdges) || isempty(fallingEdges)
+    disp("No valid S&C preamble");
+    return;
 end
 
-scIdx = risingEdges(1) + bestOffset;
-fprintf('Best offset: %d, CP error: %.6f\n', bestOffset, bestError);
+safetyMargin = 0;
+scIdx = risingEdges(1) + cplen - safetyMargin;
 % deltaF = 0;
 deltaF = angle(P(scIdx)) * fs / (pi*nfft);
 fprintf('CFO estimate: %.2f Hz\n', deltaF);
@@ -156,7 +147,7 @@ rx_bb = rx_bb .* exp(-1j * 2 * pi * deltaF * t_rx);
 
 
 
-dataStart = scIdx + symbolLen;
+dataStart = scIdx + nfft;
 
 % % searchRange = scIdx : scIdx + (nfft + cplen) * 2;
 % % [xc, lags] = xcorr(rxCorrected(searchRange), preamble_bb);
@@ -205,10 +196,11 @@ if showPlots
     xline(scIdx/fs, 'r--', 'scIdx');
 
     subplot(2,1,2);
-    plotRange = max(1,scIdx-500) : min(length(rx_bb), scIdx+symbolLen*3);
+    plotRange = max(1,scIdx-700) : min(length(rx_bb), scIdx+symbolLen*3);
     plot(real(rx_bb(plotRange)));
-    xline(501, 'r--', 'scIdx');
-    xline(501+symbolLen, 'g--', 'dataStart');
+    xline(701, 'r--', 'scIdx');
+    xline(701+(nfft), 'g--', 'dataStart');
+    xline(701 + (nfft/2), 'p--', 's&c middle')
     title('Baseband signal around sync point');
 end
 
