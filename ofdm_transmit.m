@@ -11,7 +11,7 @@ MUST BE MATCHED WITH ofdm_receive.m
 M = 4;
 k = log2(M);
 nfft = 2048;
-cplen = 1024;
+cplen = 512;
 fs = 48000;
 fc = 10000;
 
@@ -20,9 +20,14 @@ numActiveCarriers = 100;
 pilotSpacing = 5;
 
 %centre around nfft/2 
-activeCarriers = ((nfft/2) - (numActiveCarriers/2) : (nfft/2) + (numActiveCarriers/2)).';
+% activeCarriers = ((nfft/2) - (numActiveCarriers/2) : (nfft/2) + (numActiveCarriers/2)).';
+% activeCarriers(activeCarriers == nfft/2 + 1) = []; % remove dc 0 
 
-activeCarriers(activeCarriers == nfft/2 + 1) = []; % remove dc 0 
+halfCarriers = numActiveCarriers/2;
+posCarriers = 2 : (halfCarriers+1);
+negCarriers = (nfft - halfCarriers + 1) : nfft;
+
+activeCarriers = [posCarriers, negCarriers].';
 
 % define idx for pilot, data and null carriers
 pilotIdx = activeCarriers(1:pilotSpacing:end);
@@ -189,7 +194,7 @@ t = (0:length(tx_bb)-1)'/fs;
 
 txPassband = real(tx_bb .* exp(1j*2*pi*fc*t));
 txPassband = txPassband / max(abs(txPassband)) * 0.9;
-txPassband = [silence; txPassband; silence]; % not necessarily needed
+txPassband = [silence; txPassband ]; % not necessarily needed
 
 % signal = awgn(txPassband, 50); % awgn if wanted
 signal = txPassband;
