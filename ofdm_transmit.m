@@ -58,12 +58,16 @@ headerBits = de2bi(totalBits, 16, 'left-msb').';
 
 allBits = [ headerBits; bits ]; % stack header and payload
 
+trellis = poly2trellis(3, [6 7]);
+codedBits = convenc(allBits, trellis);
+
+
 % FORMAT
 bitsPerFrame = length(dataIdx) * k;
-nFrames = ceil(numel(allBits) / bitsPerFrame);
+nFrames = ceil(numel(codedBits) / bitsPerFrame);
 requiredTotalBits = nFrames * bitsPerFrame;
 
-paddedBits = [allBits; zeros(requiredTotalBits - numel(allBits), 1)]; % pad to make square. 
+paddedBits = [codedBits; zeros(requiredTotalBits - numel(codedBits), 1)]; % pad to make square. 
 
 bitgroups = reshape(paddedBits, k, [])'; % reshape by width k
 inputSymbols = bi2de(bitgroups, 'left-msb'); % conv to int
@@ -125,7 +129,7 @@ t = (0:length(tx_bb)-1)'/fs;
 
 txPassband = real(tx_bb .* exp(1j*2*pi*fc*t));
 txPassband = txPassband / max(abs(txPassband)) * 0.9;
-txPassband = [silence; txPassband]; % not necessarily needed
+txPassband = [ txPassband]; % not necessarily needed
 
 % signal = awgn(txPassband, 50); % awgn if wanted
 signal = txPassband;
@@ -134,4 +138,4 @@ disp("Tx done");
 
 player = audioplayer(signal, fs);
 
-play(player);
+% play(player);
