@@ -15,8 +15,13 @@ cplen = 1024;
 fs = 48000;
 fc = 10000;
 
+%% --== DEFINE SCRIPT PARAMS ==--
+
+useCoding = true;
+txMode = 'image';
+
 %% --== DEFINE CARRIERS ==--
-numActiveCarriers = 100;
+numActiveCarriers = 400;
 pilotSpacing = 5;
 
 %centre around nfft/2 
@@ -31,10 +36,24 @@ nullIdx = setdiff(1:nfft, activeCarriers).';
 
 %% --== MESSAGE ==--
 
-% msg = 'bass is really cool yo i swear yo';
-file = fopen("./tests/textfile.txt","r")';
-msg = fscanf(file, "%c");
-fclose(file);
+if strcmp(txMode, 'image')
+    img = imread('./images/university-of-york-logo.jpg');
+    img = im2gray(img);
+    img = imresize(img, [ 128 128 ], 'nearest');
+    imshow(img);
+    imgBytes = img(:);
+    binchars = dec2bin(imgBytes, 8);
+    bits = reshape(binchars.' - '0', [], 1);
+else
+    file = fopen("./tests/textfile.txt","r")';
+    msg = fscanf(file, "%c");
+    fclose(file);
+    binchars = dec2bin(msg, 8);
+    bits = reshape(binchars.' - '0', [], 1);
+end
+
+totalBits = numel(bits); 
+
 
 %% --== CONSTELLATION ==--
 
@@ -48,26 +67,25 @@ cdScope = comm.ConstellationDiagram( ...
 
 %% --== TX - QPSK ==--
 
-% translate message into integers 0->M-1
-binchars = dec2bin(msg, 8); 
-bits = reshape(binchars.' - '0', [], 1); % convert from ascii nums to int
-totalBits = numel(bits); 
-
 % HEADER
-headerBits = de2bi(totalBits, 16, 'left-msb').';
+headerBits = de2bi(totalBits, 32, 'left-msb').';
 
 allBits = [ headerBits; bits ]; % stack header and payload
 
 trellis = poly2trellis(3, [6 7]);
-codedBits = convenc(allBits, trellis);
 
+if useCoding
+    tx_bits = convenc(allBits, trellis);
+else
+    tx_bits = allBits;
+end
 
 % FORMAT
 bitsPerFrame = length(dataIdx) * k;
-nFrames = ceil(numel(codedBits) / bitsPerFrame);
+nFrames = ceil(numel(tx_bits) / bitsPerFrame);
 requiredTotalBits = nFrames * bitsPerFrame;
 
-paddedBits = [codedBits; zeros(requiredTotalBits - numel(codedBits), 1)]; % pad to make square. 
+paddedBits = [tx_bits; zeros(requiredTotalBits - numel(tx_bits), 1)]; % pad to make square. 
 
 bitgroups = reshape(paddedBits, k, [])'; % reshape by width k
 inputSymbols = bi2de(bitgroups, 'left-msb'); % conv to int
