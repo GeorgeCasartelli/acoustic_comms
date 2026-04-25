@@ -18,9 +18,16 @@ cplen = 1024;
 fs = 48000;
 fc = 10000;
 
+%% --== DEFINE SCRIPT PARAMS ==--
+
+useCoding = true;
+txMode = 'image';
+imageSize = 128;
+headerSize = 32;
+
 %% --== DEFINE CARRIERS ==--
 
-numActiveCarriers = 100;
+numActiveCarriers = 400;
 pilotSpacing = 5;
 
 % centre around nfft/2
@@ -58,8 +65,6 @@ inputSymbols = bi2de(bitgroups, 'left-msb'); % conv to int
 
 dataIn = inputSymbols;
 
-% create pilot data ( symbol 00 ) based on nFrames
-pilots = repmat(pskmod(0,M,pi/4),length(pilotIdx),nFrames+1);
 
 
 %% --== CONTSTELLATION ==--
@@ -72,7 +77,7 @@ cdScope = comm.ConstellationDiagram( ...
 
 %% --== RECORDER ==--
 recorder = audiorecorder(fs,16,1);
-recordDuration = 5;
+recordDuration = 30;
 recordblocking(recorder, recordDuration);
 rx = getaudiodata(recorder);
 
@@ -88,13 +93,13 @@ t_rx = (0:length(rx)-1)' /fs; % new time vector
 rx_mixed = rx .* exp(-1j*2*pi*fc*t_rx); % mix down to baseband
 
 % filter
-lpCutoff = 2000; % may need adjusting
+lpCutoff = 10000; % may need adjusting
 [b, a] = butter(6, lpCutoff/(fs/2));
 rx_baseband = filter(b, a, rx_mixed);
 
 % rx_baseband = rx_mixed;
-
-preamble_bb = ofdmmod(preambleData, nfft, cplen, nullIdx, pilotIdx, pilots(:,1)); % make a preamble reference
+pilotSym = repmat(pskmod(0, M, pi/4), length(pilotIdx), 1);
+preamble_bb = ofdmmod(preambleData, nfft, cplen, nullIdx, pilotIdx, pilotSym); % make a preamble reference
 
 %% --== ALIGN W/ PREAMBLE ==--
 
@@ -116,12 +121,16 @@ rxTrimmed = rxAligned(1 : numSymbolsReceived * symbolLen);
 rxPreamble = x1(:, 1); % get first symbol (preamble) 
 rxDataSyms = x1(:, 2:end); % get payload
 
-disp(preamble);
-disp(pskdemod(rxPreamble, M, pi/4));
+% disp(preamble);
+% disp(pskdemod(rxPreamble, M, pi/4));
 
+nDataSyms = size(rxDataSyms, 2);
+pilots = repmat(pskmod(0,M,pi/4), length(pilotIdx), nDataSyms+1);
 nSyms = size(pilots, 2);
-nDataSyms = min(size(rxDataSyms, 2), nFrames);
+
 x1_equalised = zeros(length(dataIdx), nDataSyms);
+
+
 
 for sym = 1:nDataSyms
     H_pilots = rxPilots(:, sym+1) ./ pilots(:, sym+1); % channel estimate at the pilot
@@ -129,38 +138,69 @@ for sym = 1:nDataSyms
     x1_equalised(:, sym) = rxDataSyms(:, sym) ./ H_interp; % apply channel correction
 end
 
+cdScope(x1_equalised(:)); % plot on scope
+
 rxData = pskdemod(x1_equalised, M, pi/4);
 
-%% ---- DATA CHECK AND RECOVERY ----
-% isequal(rxData(:),inputSymbols)
 
-cdScope(x1_equalised(:)); % plot on scope
+
+%% ---- DATA CHECK AND RECOVERY ----
+% isequal(rxData(:),inputSymbols
 
 % convert symbols back to bits
 rawData = de2bi(rxData(:), k, 'left-msb');
 allRxBits = reshape(rawData.', [], 1); % flatten to single bitstream
 
-if length(allRxBits) >= 16
+tbdepth = 34;
+trellis = poly2trellis(3, [ 6 7 ]);
 
-    recoveredLen = bi2de(allRxBits(1:16)', 'left-msb'); % get msg length
-    fprintf('Header decoded! Message length: %d bits\n', recoveredLen);
-    
-    if length(allRxBits) >= (16 + recoveredLen)
-        finalBits = allRxBits(17 : 17 + recoveredLen - 1); %skip header, grab data
-        
-        % inverse of tx, convert back to text
-        outputBits_reshape = reshape(finalBits, 8, [])';
-        charArray = char(outputBits_reshape + '0');
-        outputText = bin2dec(charArray).';
-        fprintf('Recovered: %s\n', char(outputText));
-        
-        % print bit error
-        bitErrors = sum(bits ~= finalBits);
-        actualBER = bitErrors / recoveredLen;
-        fprintf('Bit Error Rate (BER): %.4f\n', actualBER);
-    else
-        disp('Error: Not enough bits received to match header length.');
-    end
-else
+% remodulate for constellation plot 
+if length(allRxBits) < headerSize
     disp('Error: Could not even decode the 16-bit header.');
+    return;
 end
+
+
+if useCoding
+    decodedBits = vitdec(allRxBits, trellis, tbdepth, 'trunc', 'hard');    
+    recoveredLen = bi2de(decodedBits(1:headerSize)', 'left-msb'); % get msg length
+    fprintf('Header decoded! Message length: %d bits\n', recoveredLen);
+    payloadBits = decodedBits(headerSize+1:end);
+else
+    recoveredLen = bi2de(allRxBits(1:headerSize)', 'left-msb');
+    payloadBits = allRxBits(headerSize+1:end);
+end
+
+if length(payloadBits) < (recoveredLen)
+    fprintf("Warning: only got %d of %d bits\n", length(payloadBits), recoveredLen);
+    recoveredLen = length(payloadBits);
+end
+
+finalBits = payloadBits(1: recoveredLen); %skip header, grab data
+    
+if strcmp(txMode, 'image')
+    rawBytes = bi2de(reshape(finalBits, 8, []).', 'left-msb');
+    recoveredImg = uint8(reshape(rawBytes, imageSize, imageSize));
+    imshow(recoveredImg);
+else
+    % inverse of tx, convert back to text
+    outputBits_reshape = reshape(finalBits, 8, [])';
+    charArray = char(outputBits_reshape + '0');
+    outputText = bin2dec(charArray).';
+    fprintf('Recovered: %s\n', char(outputText));
+end
+
+% print bit error
+if length(bits) == length(finalBits)     
+    bitErrors = sum(bits ~= finalBits);
+    actualBER = bitErrors / recoveredLen;
+    fprintf('Bit Error Rate (BER): %.4f\n', actualBER);
+else
+    fprintf("Unmatching array sizes bits: $d , finalBits: $d\n", length(bits), length(finalBits));
+end
+
+%% --== PLOTS ==--
+
+figure();
+subplot(1,1,1);
+plot(abs(fftshift(fft(rx_baseband))));
