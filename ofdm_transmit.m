@@ -18,7 +18,7 @@ fc = 10000;
 %% --== DEFINE SCRIPT PARAMS ==--
 
 useCoding = true;
-txMode = 'image';
+txMode = 'text';
 
 %% --== DEFINE CARRIERS ==--
 numActiveCarriers = 400;
