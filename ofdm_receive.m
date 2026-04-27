@@ -21,7 +21,7 @@ fc = 10000;
 %% --== DEFINE SCRIPT PARAMS ==--
 
 useCoding = true;
-txMode = 'image';
+txMode = 'text';
 imageSize = 128;
 headerSize = 32;
 
@@ -77,7 +77,11 @@ cdScope = comm.ConstellationDiagram( ...
 
 %% --== RECORDER ==--
 recorder = audiorecorder(fs,16,1);
-recordDuration = 30;
+if strcmp(txMode, 'image')
+    recordDuration = 30;
+else
+    recordDuration = 10;
+end
 recordblocking(recorder, recordDuration);
 rx = getaudiodata(recorder);
 
@@ -138,7 +142,6 @@ for sym = 1:nDataSyms
     x1_equalised(:, sym) = rxDataSyms(:, sym) ./ H_interp; % apply channel correction
 end
 
-cdScope(x1_equalised(:)); % plot on scope
 
 rxData = pskdemod(x1_equalised, M, pi/4);
 
@@ -169,6 +172,7 @@ if useCoding
 else
     recoveredLen = bi2de(allRxBits(1:headerSize)', 'left-msb');
     payloadBits = allRxBits(headerSize+1:end);
+    fprintf('Header decoded! Message length: %d bits\n', recoveredLen);
 end
 
 if length(payloadBits) < (recoveredLen)
@@ -200,7 +204,95 @@ else
 end
 
 %% --== PLOTS ==--
+framesNeeded = ceil((recoveredLen + headerSize) / (length(dataIdx) * k));
+validSyms = x1_equalised(:, 1:framesNeeded);
+cdScope(validSyms(:));
 
-figure();
-subplot(1,1,1);
-plot(abs(fftshift(fft(rx_baseband))));
+%% --== DASHBOARD ==--
+figure('Name', 'OFDM Receiver Dashboard', 'Position', [100, 100, 1400, 900]);
+
+% 1. Cross correlation (preamble sync)
+subplot(2, 3, 1);
+plot(lags, abs(xc));
+xlabel('Lag (samples)');
+ylabel('|Correlation|');
+title('Preamble Cross-Correlation');
+xline(start, 'r--', 'Sync Point');
+grid on;
+
+% 2. Frequency spectrum of received baseband
+% spectrum gets its own wide plot at the top
+subplot(2, 3, [1 2]); % spans two columns
+nfft_plot = 4096;
+f = linspace(-fs/2, fs/2, nfft_plot);
+Rx_fft = fftshift(fft(rx_baseband, nfft_plot));
+plot(f/1000, 20*log10(abs(Rx_fft)));
+xlabel('Frequency (kHz)');
+ylabel('Magnitude (dB)');
+title('Received Signal Spectrum');
+ylim([max(20*log10(abs(Rx_fft))) - 60, max(20*log10(abs(Rx_fft))) + 5]);
+
+carrierFreqs = (dataIdx - nfft/2) * (fs/nfft) + fc;
+pilotFreqs = (pilotIdx - nfft/2) * (fs/nfft) + fc;
+
+xline(carrierFreqs/1000, 'b', 'Alpha', 0.1, 'LineWidth', 0.5);
+xline(pilotFreqs/1000, 'r', 'Alpha', 0.3, 'LineWidth', 0.8);
+
+legend('Spectrum', 'Data carriers', 'Pilot carriers', 'Location', 'northwest');
+grid on;
+
+% 3. Received signal time domain
+subplot(2, 3, 3);
+t_plot = (0:length(rx)-1)/fs;
+plot(t_plot, rx);
+xlabel('Time (s)');
+ylabel('Amplitude');
+title('Received Audio (Time Domain)');
+xline(start/fs, 'r--', 'Sync Point');
+grid on;
+
+% 4. Channel estimate magnitude across subcarriers
+subplot(2, 3, 4);
+H_mean = zeros(length(pilotIdx), 1);
+for sym = 1:nDataSyms
+    H_mean = H_mean + abs(rxPilots(:, sym+1) ./ pilots(:, sym+1));
+end
+H_mean = H_mean / nDataSyms;
+plot(pilotIdx, H_mean, 'o-');
+xlabel('Subcarrier Index');
+ylabel('|H|');
+title('Mean Channel Estimate at Pilots');
+grid on;
+
+% 5. EVM per subcarrier
+subplot(2, 3, 5);
+idealSyms = pskmod(pskdemod(x1_equalised(:, 1:framesNeeded), M, pi/4), M, pi/4);
+evm_per_carrier = mean(abs(x1_equalised(:, 1:framesNeeded) - idealSyms).^2, 2);
+plot(dataIdx, 10*log10(evm_per_carrier));
+xlabel('Subcarrier Index');
+ylabel('EVM (dB)');
+title('Error Vector Magnitude per Subcarrier');
+grid on;
+
+% 6. BER summary text box
+subplot(2, 3, 6);
+axis off;
+if length(bits) == length(finalBits)
+    berText = sprintf('%.4f', actualBER);
+else
+    berText = 'N/A';
+end
+text(0.5, 0.85, 'System Summary', 'FontSize', 14, 'FontWeight', 'bold', ...
+    'HorizontalAlignment', 'center');
+text(0.5, 0.70, sprintf('Active Carriers: %d', numActiveCarriers), ...
+    'FontSize', 11, 'HorizontalAlignment', 'center');
+text(0.5, 0.58, sprintf('Pilot Spacing: %d', pilotSpacing), ...
+    'FontSize', 11, 'HorizontalAlignment', 'center');
+text(0.5, 0.46, sprintf('Data Carriers: %d', length(dataIdx)), ...
+    'FontSize', 11, 'HorizontalAlignment', 'center');
+text(0.5, 0.34, sprintf('Coding: %s', mat2str(useCoding)), ...
+    'FontSize', 11, 'HorizontalAlignment', 'center');
+text(0.5, 0.22, sprintf('BER: %s', berText), ...
+    'FontSize', 11, 'HorizontalAlignment', 'center');
+text(0.5, 0.10, sprintf('Recovered %d / %d bits', length(finalBits), recoveredLen), ...
+    'FontSize', 11, 'HorizontalAlignment', 'center');
