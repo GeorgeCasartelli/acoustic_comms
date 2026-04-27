@@ -1,10 +1,10 @@
 # Aerial Acoustic Communications Demonstrator
 **Final Year BEng Project**
 
-A MATLAB implementation of an OFDM modem for data transmission via acoustic waves. This system is designed to transmit text data through air using subcarrier interleaving and preamble-based equalization.
+A MATLAB implementation of an OFDM modem for data transmission via acoustic waves. This system is designed to transmit text data or small images through air using 400 subcarriers with pilot based channel correction.
 
 ## System Overview
-The project implements a digital communication pipeline adapted for acoustic frequencies. Preamble correlation allows for signals to be synchronised.
+The project implements a digital communication pipeline adapted for acoustic frequencies. Preamble correlation allows for packets to be detected. Pilot symbols allow for equalisation of the acoustic channel, fixing Carrier Frequency Offset (CFO)
 
 ## Hardware Setup
 - **Transmitter:** Genelec Active Studio Monitor
