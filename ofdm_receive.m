@@ -208,7 +208,7 @@ framesNeeded = ceil((recoveredLen + headerSize) / (length(dataIdx) * k));
 validSyms = x1_equalised(:, 1:framesNeeded);
 cdScope(validSyms(:));
 
-[R_b, eff] = data_rate_calc(fs, nfft, cplen, length(dataIdx), numActiveCarriers, 0.5, k);
+[R_b] = data_rate_calc(fs, nfft, cplen, length(dataIdx), 0.5, k);
 
 
 %% --== DASHBOARD ==--
