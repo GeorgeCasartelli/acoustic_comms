@@ -208,7 +208,11 @@ framesNeeded = ceil((recoveredLen + headerSize) / (length(dataIdx) * k));
 validSyms = x1_equalised(:, 1:framesNeeded);
 cdScope(validSyms(:));
 
+[R_b, eff] = data_rate_calc(fs, nfft, cplen, length(dataIdx), numActiveCarriers, 0.5, k);
+
+
 %% --== DASHBOARD ==--
+
 figure('Name', 'OFDM Receiver Dashboard', 'Position', [100, 100, 1400, 900]);
 
 % 1. Cross correlation (preamble sync)
@@ -284,8 +288,8 @@ else
 end
 text(0.5, 0.9, 'System Summary', 'FontSize', 14, 'FontWeight', 'bold', ...
     'HorizontalAlignment', 'center');
-text(0.5, 0.82, sprintf('DataRate: %d', data_rate_calc(fs, nfft, cplen, length(dataIdx), 0.5, k)), ...
-    'FontSize', 11, 'HorizontalAlignment', 'center');
+text(0.5, 0.82, sprintf("Data Rate: %d", R_b), ...
+    "FontSize", 11, "HorizontalAlignment", "center");
 text(0.5, 0.70, sprintf('Active Carriers: %d', numActiveCarriers), ...
     'FontSize', 11, 'HorizontalAlignment', 'center');
 text(0.5, 0.58, sprintf('Pilot Spacing: %d', pilotSpacing), ...
