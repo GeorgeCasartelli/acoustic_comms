@@ -24,6 +24,7 @@ useCoding = true;
 txMode = 'text';
 imageSize = 128;
 headerSize = 32;
+useInterleaving = true;
 
 %% --== DEFINE CARRIERS ==--
 
@@ -154,8 +155,27 @@ rxData = pskdemod(x1_equalised, M, pi/4);
 rawData = de2bi(rxData(:), k, 'left-msb');
 allRxBits = reshape(rawData.', [], 1); % flatten to single bitstream
 
-tbdepth = 34;
 trellis = poly2trellis(3, [ 6 7 ]);
+tbdepth = 34;
+
+headerCodedLen = 32 * 2; % since we have 1/2 redundancy
+headerPart = allRxBits(1:headerCodedLen);
+decodedHeader = vitdec(headerPart, trellis, 10, 'trunc', 'hard');
+recoveredLen = bi2de(decodedHeader(1:32)', 'left-msb');
+
+fprintf("Header decoded! Payload length: %d bits\n", recoveredLen);
+
+payloadCodedLen = recoveredLen * 2; % assuming 1/2 rate coding
+payloadPart = allRxBits(headerCodedLen + 1 : headerCodedLen + payloadCodedLen);
+
+if useInterleaving
+    interleaveSeed = 12345;
+    payloadPart = randdeintrlv(payloadPart, interleaveSeed);
+end
+
+finalBits = vitdec(payloadPart, trellis, 34, 'trunc', 'hard');
+finalBits = finalBits(1:recoveredLen); % Trim any trailing zeros
+
 
 % remodulate for constellation plot 
 if length(allRxBits) < headerSize
@@ -163,25 +183,37 @@ if length(allRxBits) < headerSize
     return;
 end
 
+%% --== DE INTERLEAV ==--
+% if useInterleaving
+%     N = length(allRxBits);
+% 
+%     rng(42);
+%     elements = randperm(N);
+% 
+%     allRxBits = deintrlv(allRxBits, elements);
+% 
+% end
 
-if useCoding
-    decodedBits = vitdec(allRxBits, trellis, tbdepth, 'trunc', 'hard');    
-    recoveredLen = bi2de(decodedBits(1:headerSize)', 'left-msb'); % get msg length
-    fprintf('Header decoded! Message length: %d bits\n', recoveredLen);
-    payloadBits = decodedBits(headerSize+1:end);
-else
-    recoveredLen = bi2de(allRxBits(1:headerSize)', 'left-msb');
-    payloadBits = allRxBits(headerSize+1:end);
-    fprintf('Header decoded! Message length: %d bits\n', recoveredLen);
-end
 
-if length(payloadBits) < (recoveredLen)
-    fprintf("Warning: only got %d of %d bits\n", length(payloadBits), recoveredLen);
-    recoveredLen = length(payloadBits);
-end
-
-finalBits = payloadBits(1: recoveredLen); %skip header, grab data
-    
+%% --==DECODE ==--
+% if useCoding
+%     decodedBits = vitdec(allRxBits, trellis, tbdepth, 'trunc', 'hard');    
+% else
+%     decodedBits = allRxBits;
+% end
+% 
+% recoveredLen = bi2de(decodedBits(1:headerSize)', 'left-msb'); % get msg length
+% fprintf('Header decoded! Message length: %d bits\n', recoveredLen);
+% 
+% payloadBits = decodedBits(headerSize+1:end);
+% 
+% if length(payloadBits) < (recoveredLen)
+%     fprintf("Warning: only got %d of %d bits\n", length(payloadBits), recoveredLen);
+%     recoveredLen = length(payloadBits);
+% end
+% 
+% finalBits = payloadBits(1: recoveredLen); %skip header, grab data
+% 
 if strcmp(txMode, 'image')
     rawBytes = bi2de(reshape(finalBits, 8, []).', 'left-msb');
     recoveredImg = uint8(reshape(rawBytes, imageSize, imageSize));
