@@ -156,4 +156,6 @@ disp("Tx done");
 
 player = audioplayer(signal, fs);
 
+disp(data_rate_calc(fs, nfft, cplen, length(dataIdx), 0.5, k));
+
 % play(player);
