@@ -34,5 +34,5 @@ fprintf("Pilot Efficiency:  %.2f%%\n", pilotEfficiency * 100);
 fprintf("Coding Efficiency: %.2f%%\n", codingEfficiency * 100);
 fprintf("Efficiency:        %.2f%%\n", efficiency * 100);
 fprintf("Throughput:        %.2f bps\n", R_b * pilotEfficiency * cpEfficiency);
-fprintf("---------------------------------------");
+fprintf("---------------------------------------\n");
 end
