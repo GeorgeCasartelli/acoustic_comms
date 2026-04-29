@@ -19,6 +19,8 @@ fc = 10000;
 
 useCoding = true;
 txMode = 'text';
+useInterleaving = true;
+useSingleCarrier = false;
 
 %% --== DEFINE CARRIERS ==--
 numActiveCarriers = 400;
@@ -35,11 +37,12 @@ dataIdx = setdiff(activeCarriers, pilotIdx);
 nullIdx = setdiff(1:nfft, activeCarriers).'; 
 
 %% --== MESSAGE ==--
+imageSize = 128;
 
 if strcmp(txMode, 'image')
     img = imread('./images/university-of-york-logo.jpg');
     img = im2gray(img);
-    img = imresize(img, [ 128 128 ], 'nearest');
+    img = imresize(img, [ imageSize imageSize ], 'nearest');
     imshow(img);
     imgBytes = img(:);
     binchars = dec2bin(imgBytes, 8);
@@ -69,16 +72,28 @@ cdScope = comm.ConstellationDiagram( ...
 
 % HEADER
 headerBits = de2bi(totalBits, 32, 'left-msb').';
-
-allBits = [ headerBits; bits ]; % stack header and payload
-
+% allBits = [ headerBits; bits ]; % stack header and payload
 trellis = poly2trellis(3, [6 7]);
 
+
 if useCoding
-    tx_bits = convenc(allBits, trellis);
+    tx_header = convenc(headerBits, trellis);
+    codedPayload = convenc(bits, trellis);
 else
-    tx_bits = allBits;
+    tx_header = headerBits;
+    codedPayload = bits;
 end
+
+
+interleaveSeed = 12345;
+if useInterleaving
+    tx_payload_interleave = randintrlv(codedPayload, interleaveSeed);
+else
+    tx_payload_interleave = codedPayload;
+end
+
+tx_bits = [ tx_header ; tx_payload_interleave ] ;
+
 
 % FORMAT
 bitsPerFrame = length(dataIdx) * k;
@@ -89,6 +104,30 @@ paddedBits = [tx_bits; zeros(requiredTotalBits - numel(tx_bits), 1)]; % pad to m
 
 bitgroups = reshape(paddedBits, k, [])'; % reshape by width k
 inputSymbols = bi2de(bitgroups, 'left-msb'); % conv to int
+
+
+% %% --== INTERLEAVER ==--
+
+% useInterleaving = true;
+% 
+% if useInterleaving
+%     N = length(tx_bits);
+% 
+%     rng(10);
+%     elements = randperm(N);
+% 
+%     tx_bits = intrlv(tx_bits, elements);
+% end
+
+% if useInterleaving
+% 
+%     interleaveSeed = 12345;
+%     tx_bits_interleaved = randintrlv(paddedBits, interleaveSeed);
+% 
+% else
+%     tx_bits_interleaved = paddedBits;
+% end
+
 
 
 % PREAMBLE
@@ -108,6 +147,8 @@ qpskSigFull = [preambleData, qpskSig];
 
 % DEFINE PILOTS
 pilots = repmat(pskmod(0,M,pi/4),length(pilotIdx),nFrames+1);
+
+
 
 tx_bb = ofdmmod(qpskSigFull, nfft, cplen, nullIdx, pilotIdx, pilots);
 
@@ -147,7 +188,7 @@ t = (0:length(tx_bb)-1)'/fs;
 
 txPassband = real(tx_bb .* exp(1j*2*pi*fc*t));
 txPassband = txPassband / max(abs(txPassband)) * 0.9;
-txPassband = [ txPassband]; % not necessarily needed
+txPassband = [ txPassband ]; % not necessarily needed
 
 % signal = awgn(txPassband, 50); % awgn if wanted
 signal = txPassband;
