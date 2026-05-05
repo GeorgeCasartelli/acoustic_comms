@@ -23,7 +23,8 @@ Current WIP for OFDM.
 ## Placeholder Metrics
 | Parameter | Value |
 | :--- | :--- |
-| **Bandwidth** | [Placeholder] kHz |
-| **Bit Rate** | [Placeholder] bps |
+| **Bandwidth** | 9375 kHz |
+| **Bit Rate** | 4997 bps |
 | **Target SNR** | [Placeholder] dB |
-| **Effective Range** | [Placeholder] m |
+| **Effective Range** | 2+ m |
+| **Carrier Freq** | 10000 Hz |
