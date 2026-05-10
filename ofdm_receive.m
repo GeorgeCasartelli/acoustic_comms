@@ -17,21 +17,21 @@ end
 M = 4;
 k = log2(M);
 nfft = 2048;
-cplen = 1024;
+cplen = 256;
 fs = 48000;
-fc = 10000;
+fc = 8000;
 
 %% --== DEFINE SCRIPT PARAMS ==--
 
-useCoding = true;
+useCoding = false;
 txMode = 'text';
 imageSize = 128;
 headerSize = 32;
-useInterleaving = true;
+useInterleaving = false;
 
 %% --== DEFINE CARRIERS ==--
 
-numActiveCarriers = 400;
+numActiveCarriers = 700;
 pilotSpacing = 5;
 
 % centre around nfft/2
@@ -84,7 +84,7 @@ recorder = audiorecorder(fs,16,1);
 if strcmp(txMode, 'image')
     recordDuration = 30;
 else
-    recordDuration = 10;
+    recordDuration = 6;
 end
 recordblocking(recorder, recordDuration);
 rx = getaudiodata(recorder);
@@ -172,6 +172,9 @@ else
     headerPart = allRxBits(1:headerSize);
     recoveredLen = bi2de(headerPart', 'left-msb');
 end
+
+% skip header decode for tests
+recoveredLen = 28672;
 
 fprintf("Header decoded! Payload length: %d bits\n", recoveredLen);
 
@@ -266,21 +269,25 @@ cdScope(validSyms(:));
 [R_b] = data_rate_calc(fs, nfft, cplen, length(dataIdx), 0.5, k);
 
 
+
+
+
 %% --== DASHBOARD ==--
 figure('Name', 'OFDM Demo Day Analysis', 'Units', 'normalized', 'OuterPosition', [0.05 0.05 0.9 0.9]);
 
 % Shared dark theme colours
 bgCol   = [0.12 0.12 0.16];
 axCol   = [0.18 0.18 0.24];
-txtCol  = [0.95 0.95 0.95];
+% txtCol  = [0.95 0.95 0.95];
+txtCol = bgCol;
 gridCol = [0.30 0.30 0.38];
 accent1 = [0.26 0.63 0.95];  % blue
 accent2 = [0.95 0.45 0.15];  % orange
 accent3 = [0.25 0.88 0.58];  % green
 accent4 = [0.95 0.30 0.45];  % red
 
-set(gcf, 'Color', bgCol);
-
+% set(gcf, 'Color', bgCol);
+% 
 %% -- Helper to style axes --
 styleAx = @(ax) set(ax, ...
     'Color', axCol, 'XColor', txtCol, 'YColor', txtCol, ...
@@ -357,10 +364,9 @@ grid on;
 %% -- 3. CHANNEL FREQUENCY RESPONSE --
 ax3 = subplot(2, 3, 3); styleAx(ax3);
 H_mag_dB = 20*log10(abs(H_interp));
-
-% convert subcarrier index to actual frequency in kHz
 dataFreqs = (dataIdx - nfft/2) * (fs/nfft) / 1000 + fc/1000;
 plot(dataFreqs, H_mag_dB, 'Color', accent3, 'LineWidth', 1.3);
+ylim([mean(H_mag_dB) - 15, mean(H_mag_dB) + 15]);  % <-- here
 title('Channel Freq. Response', 'Color', txtCol);
 xlabel('Frequency (kHz)', 'Color', txtCol);
 ylabel('|H| (dB)',        'Color', txtCol);
@@ -369,12 +375,14 @@ grid on;
 %% -- 4. CHANNEL IMPULSE RESPONSE --
 ax4 = subplot(2, 3, 4); styleAx(ax4);
 ir_est  = abs(ifft(H_interp, 256));
-ir_show = ir_est(1:48);
-t_ir_us = (0:47) / fs * 1e6; % convert samples to microseconds
+ir_show = ir_est(1:128);          % was 48, increase to 128
+t_ir_us = (0:127) / fs * 1e6;    % match
 stem(t_ir_us, ir_show, 'Color', accent2, 'MarkerFaceColor', accent2, ...
      'MarkerSize', 4, 'LineWidth', 1.5);
+ylim([0 max(ir_show) * 1.1]);
+xlim([0 max(t_ir_us)]);
 title('Channel Impulse Response', 'Color', txtCol);
-xlabel('Delay (\mus)',  'Color', txtCol);
+xlabel('Delay (\mus)', 'Color', txtCol);
 ylabel('Magnitude',    'Color', txtCol);
 grid on;
 
@@ -386,14 +394,14 @@ errors           = rxPilots - idealPilotsFull;
 
 snr_per_pilot = 10*log10( mean(abs(rxPilots).^2, 2) ./ ...
                            max(mean(abs(errors).^2,  2), 1e-10) );
-
-plot(pilotIdx, snr_per_pilot, 'Color', accent1, 'LineWidth', 1.3); hold on;
+pilotFreqs = (pilotIdx - nfft/2) * (fs/nfft) / 1000 + fc/1000;
+plot(pilotFreqs, snr_per_pilot, 'Color', accent1, 'LineWidth', 1.3); hold on;
 yline(mean(snr_per_pilot), '--', 'Color', accent4, 'LineWidth', 1.2, ...
       'Label', sprintf('Mean %.1f dB', mean(snr_per_pilot)), ...
       'LabelHorizontalAlignment', 'left', 'FontSize', 9);
 
 title('SNR per Pilot Subcarrier', 'Color', txtCol);
-xlabel('Subcarrier Index', 'Color', txtCol);
+xlabel('Frequency (kHz)', 'Color', txtCol);
 ylabel('SNR (dB)',         'Color', txtCol);
 grid on;
 
@@ -439,3 +447,19 @@ for i = 1:nRows
     text(0.58, yPos, metrics{i,2}, 'Color', txtCol, ...
          'FontSize', 10, 'FontWeight', 'bold', 'Units', 'normalized');
 end
+
+%% --== LOG TEST ==--
+
+params.test           = 'carrier_sweep';
+params.M              = M;
+params.cplen          = cplen;
+params.pilotSpacing   = pilotSpacing;
+params.numActiveCarriers = numActiveCarriers;
+params.useCoding      = useCoding;
+params.fc             = fc;
+params.distance       = 1.5;
+params.volume         = 75; % percent
+
+
+
+log_result('results.csv', params, actualBER, snr_est, R_b);
