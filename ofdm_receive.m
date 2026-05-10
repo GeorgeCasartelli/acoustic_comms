@@ -151,7 +151,7 @@ rxData = pskdemod(x1_equalised, M, pi/4);
 
 
 
-%% ---- DATA CHECK AND RECOVERY ----
+%% --== DECODE AND DE INTERLEAVE ==--
 % isequal(rxData(:),inputSymbols
 
 % convert symbols back to bits
@@ -205,37 +205,8 @@ if length(allRxBits) < headerSize
     return;
 end
 
-%% --== DE INTERLEAV ==--
-% if useInterleaving
-%     N = length(allRxBits);
-% 
-%     rng(42);
-%     elements = randperm(N);
-% 
-%     allRxBits = deintrlv(allRxBits, elements);
-% 
-% end
+%% --== DATA REFORMAT ==--
 
-
-%% --==DECODE ==--
-% if useCoding
-%     decodedBits = vitdec(allRxBits, trellis, tbdepth, 'trunc', 'hard');    
-% else
-%     decodedBits = allRxBits;
-% end
-% 
-% recoveredLen = bi2de(decodedBits(1:headerSize)', 'left-msb'); % get msg length
-% fprintf('Header decoded! Message length: %d bits\n', recoveredLen);
-% 
-% payloadBits = decodedBits(headerSize+1:end);
-% 
-% if length(payloadBits) < (recoveredLen)
-%     fprintf("Warning: only got %d of %d bits\n", length(payloadBits), recoveredLen);
-%     recoveredLen = length(payloadBits);
-% end
-% 
-% finalBits = payloadBits(1: recoveredLen); %skip header, grab data
-% 
 if strcmp(txMode, 'image')
     rawBytes = bi2de(reshape(finalBits, 8, []).', 'left-msb');
     recoveredImg = uint8(reshape(rawBytes, imageSize, imageSize));
@@ -247,6 +218,8 @@ else
     outputText = bin2dec(charArray).';
     fprintf('Recovered: %s\n', char(outputText));
 end
+
+%% --== BER ==--
 
 % print bit error
 if strcmp(txMode, 'text')
@@ -261,6 +234,7 @@ if strcmp(txMode, 'text')
 else 
     fprintf("Receiving unknown symbol. Cannot get BER\n");
 end
+
 %% --== PLOTS ==--
 framesNeeded = ceil((recoveredLen + headerSize) / (length(dataIdx) * k));
 validSyms = x1_equalised(:, 1:framesNeeded);
