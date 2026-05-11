@@ -12,26 +12,32 @@ function out = ternary(cond, a, b)
     if cond; out = a; else; out = b; end
 end
 
+%% --== DEFINE SCRIPT PARAMS ==--
+
+useCoding = true;
+txMode = 'text';
+imageSize = 128;
+headerSize = 32;
+useInterleaving = true;
+modScheme = "qpsk";
+
 %% --== DEFINE SIGNAL PARAMS ==--
 
-M = 4;
+if strcmp(modScheme, "qpsk") 
+    M = 4;
+elseif strcmp(modScheme, "16qam")
+    M = 16;
+end
 k = log2(M);
 nfft = 2048;
 cplen = 256;
 fs = 48000;
-fc = 8000;
+fc = 10000;
 
-%% --== DEFINE SCRIPT PARAMS ==--
-
-useCoding = false;
-txMode = 'text';
-imageSize = 128;
-headerSize = 32;
-useInterleaving = false;
 
 %% --== DEFINE CARRIERS ==--
 
-numActiveCarriers = 700;
+numActiveCarriers = 500;
 pilotSpacing = 5;
 
 % centre around nfft/2
@@ -72,7 +78,12 @@ dataIn = inputSymbols;
 
 
 %% --== CONTSTELLATION ==--
-constSym = pskmod((0:M-1), M, pi/4); 
+if strcmp(modScheme, "qpsk")
+    constSym = pskmod((0:M-1), M, pi/4); 
+elseif strcmp(modScheme, "16qam")
+    constSym = qammod((0:M-1), M, "UnitAveragePower", true);
+end
+
 % define constellation diagram scope
 cdScope = comm.ConstellationDiagram( ...
     'SamplesPerSymbol',1,...
@@ -146,9 +157,11 @@ for sym = 1:nDataSyms
     x1_equalised(:, sym) = rxDataSyms(:, sym) ./ H_interp; % apply channel correction
 end
 
-
-rxData = pskdemod(x1_equalised, M, pi/4);
-
+if strcmp(modScheme, "qpsk")
+    rxData = pskdemod(x1_equalised, M, pi/4);
+elseif strcmp(modScheme, "16qam")
+    rxData = qamdemod(x1_equalised, M, "UnitAveragePower", true);
+end
 
 
 %% --== DECODE AND DE INTERLEAVE ==--
@@ -424,15 +437,15 @@ end
 
 %% --== LOG TEST ==--
 
-params.test           = 'carrier_sweep';
+params.test           = 'distance_sweep_qpsk';
 params.M              = M;
 params.cplen          = cplen;
 params.pilotSpacing   = pilotSpacing;
 params.numActiveCarriers = numActiveCarriers;
 params.useCoding      = useCoding;
 params.fc             = fc;
-params.distance       = 1.5;
-params.volume         = 75; % percent
+params.distance       = 3.0;
+params.volume         = 150; % percent
 
 
 
