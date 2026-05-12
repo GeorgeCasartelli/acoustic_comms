@@ -7,23 +7,31 @@ MUST BE MATCHED WITH ofdm_receive.m
 
 %}
 
-%% --== DEFINE SIGNAL PARAMS ==--
-M = 4;
-k = log2(M);
-nfft = 2048;
-cplen = 1024;
-fs = 48000;
-fc = 10000;
-
 %% --== DEFINE SCRIPT PARAMS ==--
 
 useCoding = true;
 txMode = 'text';
 useInterleaving = true;
-useSingleCarrier = false;
+modScheme = "qpsk";
+
+
+%% --== DEFINE SIGNAL PARAMS ==--
+
+if strcmp(modScheme, "qpsk")
+    M = 4;
+elseif strcmp(modScheme, "16qam")
+    M = 16;
+end
+k = log2(M);
+nfft = 2048;
+cplen = 256;
+fs = 48000;
+fc = 10000;
+
+
 
 %% --== DEFINE CARRIERS ==--
-numActiveCarriers = 400;
+numActiveCarriers = 500;
 pilotSpacing = 5;
 
 %centre around nfft/2 
@@ -60,7 +68,11 @@ totalBits = numel(bits);
 
 %% --== CONSTELLATION ==--
 
-constSym = pskmod((0:M-1), M, pi/4); 
+if strcmp(modScheme, "qpsk")
+    constSym = pskmod((0:M-1), M, pi/4); 
+elseif strcmp(modScheme, "16qam")
+    constSym = qammod((0:M-1), M, 'UnitAveragePower', true);
+end
 % define constellation diagram scope
 cdScope = comm.ConstellationDiagram( ...
     'SamplesPerSymbol',1,...
@@ -73,7 +85,9 @@ cdScope = comm.ConstellationDiagram( ...
 % HEADER
 headerBits = de2bi(totalBits, 32, 'left-msb').';
 % allBits = [ headerBits; bits ]; % stack header and payload
-trellis = poly2trellis(3, [6 7]);
+% trellis = poly2trellis(3, [6 7]);
+
+trellis = poly2trellis(7, [171 133]);
 
 
 if useCoding
@@ -106,40 +120,22 @@ bitgroups = reshape(paddedBits, k, [])'; % reshape by width k
 inputSymbols = bi2de(bitgroups, 'left-msb'); % conv to int
 
 
-% %% --== INTERLEAVER ==--
-
-% useInterleaving = true;
-% 
-% if useInterleaving
-%     N = length(tx_bits);
-% 
-%     rng(10);
-%     elements = randperm(N);
-% 
-%     tx_bits = intrlv(tx_bits, elements);
-% end
-
-% if useInterleaving
-% 
-%     interleaveSeed = 12345;
-%     tx_bits_interleaved = randintrlv(paddedBits, interleaveSeed);
-% 
-% else
-%     tx_bits_interleaved = paddedBits;
-% end
-
-
 
 % PREAMBLE
 preamble = mod(0:numActiveCarriers-1, 4).'; % length of carriers, makes one symbol
 preambleSignal = pskmod(preamble, M, pi/4);
 
 % MODULATE
-qpskSig = reshape(pskmod(inputSymbols, M, pi/4), length(dataIdx), nFrames);  
+if strcmp(modScheme, "qpsk")
+    modSignal = reshape(pskmod(inputSymbols, M, pi/4), length(dataIdx), nFrames); 
+elseif strcmp(modScheme, "16qam")
+    modSignal = reshape(qammod(inputSymbols, M, 'UnitAveragePower', true), length(dataIdx), nFrames);
+end
+
 preambleData = preambleSignal(1:length(dataIdx)); % make the same length as data
 
 % STACK
-qpskSigFull = [preambleData, qpskSig];
+modSigFull = [preambleData, modSignal];
 
 
 
@@ -150,12 +146,12 @@ pilots = repmat(pskmod(0,M,pi/4),length(pilotIdx),nFrames+1);
 
 
 
-tx_bb = ofdmmod(qpskSigFull, nfft, cplen, nullIdx, pilotIdx, pilots);
+tx_bb = ofdmmod(modSigFull, nfft, cplen, nullIdx, pilotIdx, pilots);
 
 
 symbolLen = nfft + cplen;
 
-% WINDOW 
+% WINDOW  -   TRY WITHOUT
 roll = 16; % try 8–32 samples
 
 win = ones(symbolLen,1);
@@ -174,7 +170,8 @@ for i = 1:numSyms
     tx_bb_win(idx) = tx_bb(idx).*win;
 end
 
-tx_bb = tx_bb_win;
+% tx_bb = tx_bb_win;
+
 
 %% --== TX - AUDIO PREP ==--
 
