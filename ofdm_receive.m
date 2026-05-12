@@ -20,6 +20,26 @@ imageSize = 128;
 headerSize = 32;
 useInterleaving = true;
 modScheme = "qpsk";
+constraintLength = 7;
+
+phyParams.test = 'blocking';
+phyParams.trial = 1;
+
+phyParams.distance = 3.0;
+phyParams.volume = 100;
+
+phyParams.txAngle = 0;
+phyParams.rxAngle = 0;
+
+phyParams.blocked = 0;
+phyParams.blockerType = "none";
+
+phyParams.reflectionMode = "wall";
+
+phyParams.modscheme = modScheme;
+phyParams.useCoding = useCoding;
+
+phyParams.notes = "wall_reflection_rx_infront";
 
 %% --== DEFINE SIGNAL PARAMS ==--
 
@@ -51,15 +71,11 @@ dataIdx = setdiff(activeCarriers, pilotIdx);
 nullIdx = setdiff(1:nfft, activeCarriers).'; % define null carrier idx
 
 
-%% --== MESSAGE ==--
-
-% THIS IS USED FOR BER CALCULATION
+%% --== MESSAGE (FOR BER) ==--
 
 file = fopen("./tests/textfile.txt","r")';
 msg = fscanf(file, "%c");
 fclose(file);
-
-% convert text integers
 binchars = dec2bin(msg, 8); 
 bits = reshape(binchars.' - '0', [], 1); 
 totalBits = numel(bits); 
@@ -74,8 +90,6 @@ bitgroups = reshape(paddedBits, k, [])'; % reshape by width k
 inputSymbols = bi2de(bitgroups, 'left-msb'); % conv to int
 
 dataIn = inputSymbols;
-
-
 
 %% --== CONTSTELLATION ==--
 if strcmp(modScheme, "qpsk")
@@ -92,11 +106,7 @@ cdScope = comm.ConstellationDiagram( ...
 
 %% --== RECORDER ==--
 recorder = audiorecorder(fs,16,1);
-if strcmp(txMode, 'image')
-    recordDuration = 30;
-else
-    recordDuration = 6;
-end
+recordDuration = ternary(strcmp(txMode, 'image'), 30, 6);
 recordblocking(recorder, recordDuration);
 rx = getaudiodata(recorder);
 
@@ -106,7 +116,6 @@ rx = getaudiodata(recorder);
 preamble = mod(0:numActiveCarriers-1, 4).';
 preambleSignal = pskmod(preamble, M, pi/4);
 preambleData = preambleSignal(1:length(dataIdx));
-
 
 t_rx = (0:length(rx)-1)' /fs; % new time vector
 rx_mixed = rx .* exp(-1j*2*pi*fc*t_rx); % mix down to baseband
@@ -136,42 +145,35 @@ rxTrimmed = rxAligned(1 : numSymbolsReceived * symbolLen);
 
 %% --== OFDM DEMOD ==--
 [x1, rxPilots] = ofdmdemod(rxTrimmed, nfft, cplen, 0, nullIdx, pilotIdx);
- 
 rxPreamble = x1(:, 1); % get first symbol (preamble) 
 rxDataSyms = x1(:, 2:end); % get payload
 
-% disp(preamble);
-% disp(pskdemod(rxPreamble, M, pi/4));
-
 nDataSyms = size(rxDataSyms, 2);
-pilots = repmat(pskmod(0,M,pi/4), length(pilotIdx), nDataSyms+1);
+pilotSym = pskmod(0,M,pi/4);
+pilots = repmat(pilotSym, length(pilotIdx), nDataSyms+1);
 nSyms = size(pilots, 2);
 
 x1_equalised = zeros(length(dataIdx), nDataSyms);
-
-
-
 for sym = 1:nDataSyms
     H_pilots = rxPilots(:, sym+1) ./ pilots(:, sym+1); % channel estimate at the pilot
     H_interp = interp1(pilotIdx, H_pilots, dataIdx, 'linear', 'extrap'); % interpolate est. to data subc.
     x1_equalised(:, sym) = rxDataSyms(:, sym) ./ H_interp; % apply channel correction
 end
 
-if strcmp(modScheme, "qpsk")
-    rxData = pskdemod(x1_equalised, M, pi/4);
-elseif strcmp(modScheme, "16qam")
-    rxData = qamdemod(x1_equalised, M, "UnitAveragePower", true);
-end
 
-
+rxData = ternary(strcmp(modScheme, "qpsk"), pskdemod(x1_equalised, M, pi/4), qamdemod(x1_equalised, M, "UnitAveragePower", true));
 %% --== DECODE AND DE INTERLEAVE ==--
-% isequal(rxData(:),inputSymbols
 
 % convert symbols back to bits
 rawData = de2bi(rxData(:), k, 'left-msb');
 allRxBits = reshape(rawData.', [], 1); % flatten to single bitstream
 
-trellis = poly2trellis(3, [ 6 7 ]);
+if constraintLength == 3
+    trellis = poly2trellis(constraintLength, [ 6 7 ]);
+elseif constraintLength == 7
+    trellis = poly2trellis(7, [171 133]);
+end
+
 tbdepth = 34;
 
 if useCoding
@@ -189,6 +191,8 @@ end
 % skip header decode for tests
 recoveredLen = 28672;
 
+interleaveSeed = 12345;
+
 fprintf("Header decoded! Payload length: %d bits\n", recoveredLen);
 
 if useCoding
@@ -196,7 +200,7 @@ if useCoding
     payloadPart = allRxBits(headerCodedLen + 1 : headerCodedLen + payloadCodedLen);
 
     if useInterleaving
-        payloadPart = randdeintrlv(payloadPart, 12345);
+        payloadPart = randdeintrlv(payloadPart, interleaveSeed);
     end
 
     finalBits = vitdec(payloadPart, trellis, 34, 'trunc', 'hard');
@@ -206,7 +210,7 @@ else
     payloadPart = allRxBits(headerSize + 1 : headerSize + recoveredLen);
 
     if useInterleaving
-        payloadPart = randdeintrlv(payloadPart, 12345);
+        payloadPart = randdeintrlv(payloadPart, interleaveSeed);
     end
 
     finalBits = payloadPart;
@@ -255,187 +259,73 @@ cdScope(validSyms(:));
 
 [R_b] = data_rate_calc(fs, nfft, cplen, length(dataIdx), 0.5, k);
 
+%% --== SNR ESTIMATION ==--
+% Calculate SNR based on the deviation of received pilots from the ideal pilot symbol
+errors  = rxPilots - pilotSym;
+P_sig   = mean(abs(rxPilots(:)).^2);
+P_noise = mean(abs(errors(:)).^2);
 
-
-
-
-%% --== DASHBOARD ==--
-figure('Name', 'OFDM Demo Day Analysis', 'Units', 'normalized', 'OuterPosition', [0.05 0.05 0.9 0.9]);
-
-% Shared dark theme colours
-bgCol   = [0.12 0.12 0.16];
-axCol   = [0.18 0.18 0.24];
-% txtCol  = [0.95 0.95 0.95];
-txtCol = bgCol;
-gridCol = [0.30 0.30 0.38];
-accent1 = [0.26 0.63 0.95];  % blue
-accent2 = [0.95 0.45 0.15];  % orange
-accent3 = [0.25 0.88 0.58];  % green
-accent4 = [0.95 0.30 0.45];  % red
-
-% set(gcf, 'Color', bgCol);
-% 
-%% -- Helper to style axes --
-styleAx = @(ax) set(ax, ...
-    'Color', axCol, 'XColor', txtCol, 'YColor', txtCol, ...
-    'GridColor', gridCol, 'GridAlpha', 0.5, 'FontSize', 10, ...
-    'TitleFontSizeMultiplier', 1.1);
-
-%% -- 1. TIME DOMAIN --
-ax1 = subplot(2, 3, 1); styleAx(ax1);
-t_axis = (0:length(rx)-1)/fs;
-
-% Calculate exact number of transmitted symbols
-% Header is always coded (2x), payload depends on useCoding
-headerBits_tx = headerSize * 2;
-if useCoding
-    payloadBits_tx = recoveredLen * 2;
-else
-    payloadBits_tx = recoveredLen;
-end
-totalTxBits = headerBits_tx + payloadBits_tx;
-
-% How many OFDM data frames does that occupy (add 1 for preamble)
-bitsPerFrame   = length(dataIdx) * k;
-nTxDataFrames  = ceil(totalTxBits / bitsPerFrame);
-nTxTotalFrames = nTxDataFrames + 1; % +1 for preamble symbol
-
-% Total samples in the OFDM block
-symbolLen    = nfft + cplen;
-ofdmBlockLen = nTxTotalFrames * symbolLen;
-ofdmEnd      = min(start + ofdmBlockLen - 1, length(rx));
-
-% Full signal in dim grey
-plot(t_axis, rx, 'Color', [0.45 0.45 0.55], 'LineWidth', 0.5); hold on;
-
-% Highlight the detected OFDM block in blue
-t_ofdm = t_axis(start:ofdmEnd);
-plot(t_ofdm, rx(start:ofdmEnd), 'Color', accent1, 'LineWidth', 1.2);
-
-% Mark start with a vertical line
-xline(t_axis(start), '--', 'Color', accent3, 'LineWidth', 1.2, 'Label', 'Sync');
-
-title('Time Domain — Received Signal', 'Color', txtCol);
-xlabel('Time (s)', 'Color', txtCol);
-ylabel('Amplitude', 'Color', txtCol);
-legend({'Raw RX', 'OFDM Block'}, 'TextColor', txtCol, 'Color', axCol, 'EdgeColor', gridCol);
-grid on;
-
-%% -- 2. PASSBAND PSD --
-ax2 = subplot(2, 3, 2); styleAx(ax2);
-[pxx, f_psd] = pwelch(rx, 1024, 512, 2048, fs);
-plot(f_psd/1000, 10*log10(pxx), 'Color', accent2, 'LineWidth', 1.4); hold on;
-
-bw_theory = (numActiveCarriers * fs) / nfft;
-f_start   = (fc - bw_theory/2) / 1000;
-f_end     = (fc + bw_theory/2) / 1000;
-ylims     = ylim;
-patch([f_start f_end f_end f_start], [ylims(1) ylims(1) ylims(2) ylims(2)], ...
-      accent1, 'FaceAlpha', 0.15, 'EdgeColor', accent1, 'LineWidth', 1);
-
-% mark carrier and band edges explicitly
-xline(fc/1000,           '-',  'Color', txtCol,  'Alpha', 0.5, ...
-      'Label', sprintf('f_c = %g kHz', fc/1000),       'FontSize', 8);
-xline(f_start,           '--', 'Color', accent1, 'Alpha', 0.7, ...
-      'Label', sprintf('%.1f kHz', f_start),            'FontSize', 8);
-xline(f_end,             '--', 'Color', accent1, 'Alpha', 0.7, ...
-      'Label', sprintf('%.1f kHz', f_end),              'FontSize', 8);
-
-title(sprintf('Passband PSD  |  OBW: %.0f Hz', bw_theory), 'Color', txtCol);
-xlabel('Frequency (kHz)', 'Color', txtCol);
-ylabel('Power (dB/Hz)',   'Color', txtCol);
-xlim([(fc - fs/4)/1000,  (fc + fs/4)/1000]);
-legend({'PSD', 'Occupied BW'}, 'TextColor', txtCol, 'Color', axCol, 'EdgeColor', gridCol);
-grid on;
-
-%% -- 3. CHANNEL FREQUENCY RESPONSE --
-ax3 = subplot(2, 3, 3); styleAx(ax3);
-H_mag_dB = 20*log10(abs(H_interp));
-dataFreqs = (dataIdx - nfft/2) * (fs/nfft) / 1000 + fc/1000;
-plot(dataFreqs, H_mag_dB, 'Color', accent3, 'LineWidth', 1.3);
-ylim([mean(H_mag_dB) - 15, mean(H_mag_dB) + 15]);  % <-- here
-title('Channel Freq. Response', 'Color', txtCol);
-xlabel('Frequency (kHz)', 'Color', txtCol);
-ylabel('|H| (dB)',        'Color', txtCol);
-grid on;
-
-%% -- 4. CHANNEL IMPULSE RESPONSE --
-ax4 = subplot(2, 3, 4); styleAx(ax4);
-ir_est  = abs(ifft(H_interp, 256));
-ir_show = ir_est(1:128);          % was 48, increase to 128
-t_ir_us = (0:127) / fs * 1e6;    % match
-stem(t_ir_us, ir_show, 'Color', accent2, 'MarkerFaceColor', accent2, ...
-     'MarkerSize', 4, 'LineWidth', 1.5);
-ylim([0 max(ir_show) * 1.1]);
-xlim([0 max(t_ir_us)]);
-title('Channel Impulse Response', 'Color', txtCol);
-xlabel('Delay (\mus)', 'Color', txtCol);
-ylabel('Magnitude',    'Color', txtCol);
-grid on;
-
-%% -- 5. SNR PER PILOT --
-ax5 = subplot(2, 3, 5); styleAx(ax5);
-nReceivedFrames  = size(rxPilots, 2);
-idealPilotsFull  = repmat(pilotSym, 1, nReceivedFrames);
-errors           = rxPilots - idealPilotsFull;
-
-snr_per_pilot = 10*log10( mean(abs(rxPilots).^2, 2) ./ ...
-                           max(mean(abs(errors).^2,  2), 1e-10) );
-pilotFreqs = (pilotIdx - nfft/2) * (fs/nfft) / 1000 + fc/1000;
-plot(pilotFreqs, snr_per_pilot, 'Color', accent1, 'LineWidth', 1.3); hold on;
-yline(mean(snr_per_pilot), '--', 'Color', accent4, 'LineWidth', 1.2, ...
-      'Label', sprintf('Mean %.1f dB', mean(snr_per_pilot)), ...
-      'LabelHorizontalAlignment', 'left', 'FontSize', 9);
-
-title('SNR per Pilot Subcarrier', 'Color', txtCol);
-xlabel('Frequency (kHz)', 'Color', txtCol);
-ylabel('SNR (dB)',         'Color', txtCol);
-grid on;
-
-% Overall scalar SNR (used in metrics panel)
-P_signal = mean(abs(rxPilots(:)).^2);
-P_noise  = mean(abs(errors(:)).^2);
+% Avoid log of zero
 if P_noise == 0; P_noise = 1e-10; end
-snr_est  = 10*log10(P_signal / P_noise);
+snr_est = 10 * log10(P_sig / P_noise);
 
-%% -- 6. METRICS PANEL --
-ax6 = subplot(2, 3, 6);
-set(ax6, 'Color', axCol, 'XColor', 'none', 'YColor', 'none'); axis off;
+%% --== RECONSTRUCT IDEAL SYMBOLS  ==--
 
-% Card-style rows
-metrics = {
-    '⚡  Data Rate',         sprintf('%.2f kbps',  R_b/1000);
-    '📡  Occupied BW',       sprintf('%.0f Hz',    bw_theory);
-    '📶  Est. SNR',          sprintf('%.2f dB',    snr_est);
-    '🔢  Spectral Eff.',     sprintf('%.3f b/s/Hz',R_b/bw_theory);
-    '🧩  Coding',            ternary(useCoding, 'Conv. r=1/2', 'None');
-    '🔀  Interleaving',      ternary(useInterleaving, 'On', 'Off');
-    '📦  Mode',              txMode;
-};
+% rebuild tx side symbol indices for SER comparison
+% trellis = poly2trellis(7, [171 133]);
+% interleaveSeed = 12345;
 
-if strcmp(txMode, 'text')
-    metrics{end+1, 1} = '❌  BER';
-    metrics{end,   2} = sprintf('%.5f', actualBER);
+% encode known symbols
+if useCoding
+    tx_header_re = convenc(de2bi(totalBits, 32, 'left-msb').', trellis);
+    payload_coded_re = convenc(bits, trellis); % 'bits' are your final decoded bits
+else
+    tx_header_re = de2bi(totalBits, 32, 'left-msb').';
+    payload_coded_re = bits;
 end
 
-nRows  = size(metrics, 1);
-yStart = 0.93;
-yStep  = 0.88 / nRows;
-
-text(0.0, 1.01, 'System Metrics', 'Color', txtCol, 'FontSize', 13, ...
-     'FontWeight', 'bold', 'Units', 'normalized');
-
-for i = 1:nRows
-    yPos = yStart - (i-1)*yStep;
-    % dim label
-    text(0.02, yPos, metrics{i,1}, 'Color', [0.65 0.65 0.75], ...
-         'FontSize', 10, 'Units', 'normalized');
-    % bright value
-    text(0.58, yPos, metrics{i,2}, 'Color', txtCol, ...
-         'FontSize', 10, 'FontWeight', 'bold', 'Units', 'normalized');
+% interleave known symbols
+if useInterleaving
+    payload_int_re = randintrlv(payload_coded_re, interleaveSeed);
+else
+    payload_int_re = payload_coded_re;
 end
 
-%% --== LOG TEST ==--
+tx_bits_re = [tx_header_re; payload_int_re];
+bitsPerFrame = length(dataIdx) * k;
+nFramesData = ceil(numel(tx_bits_re) / bitsPerFrame);
+paddedBits_re = [tx_bits_re; zeros(nFramesData * bitsPerFrame - numel(tx_bits_re), 1)];
+
+bitgroups_re = reshape(paddedBits_re, k, [])';
+inputSyms_re = bi2de(bitgroups_re, 'left-msb');
+idealDataSymbols = reshape(inputSyms_re, length(dataIdx), nFramesData);
+
+%% --== ALIGN AND COMPARE ==--
+
+compareLen = min(size(rxData,2), nFramesData);
+
+rxTest = rxData(:, 1:compareLen);
+txTest = idealDataSymbols(:, 1:compareLen);
+
+% symbol error rate per subcarrier
+serPerSubcarrier = sum(rxTest ~= txTest, 2) / compareLen;
+
+% overall SER
+totalSymbolErrors = sum(rxTest(:) ~= txTest(:));
+totalSymbols = numel(rxTest);
+
+actualSER = totalSymbolErrors / totalSymbols;
+
+fprintf('Symbol Error Rate (SER): %.6f\n', actualSER);
+%% --== DASHBOARD ==--
+
+display_ofdm_dashboard(rx, fs, start, recoveredLen, headerSize, dataIdx, k, ...
+    fc, numActiveCarriers, H_interp, rxPilots, pilotSym, pilotIdx, nfft, cplen, ...
+    useCoding, useInterleaving, txMode, actualBER, R_b, modScheme, snr_est, ...
+    constraintLength, serPerSubcarrier);
+
+
+%% --== LOG TEST (PARAM TUNING) ==--
 
 params.test           = 'distance_sweep_qpsk';
 params.M              = M;
@@ -446,7 +336,36 @@ params.useCoding      = useCoding;
 params.fc             = fc;
 params.distance       = 3.0;
 params.volume         = 150; % percent
+params.constraintLength = constraintLength;
+params.modscheme     = modScheme;
 
+% log_result('results.csv', params, actualBER, snr_est, R_b);
 
+%% --== LOG TEST (PHY EVAL) ==--
 
-log_result('results.csv', params, actualBER, snr_est, R_b);
+% phyParams.test = 'distance_qpsk';
+% phyParams.trial = 3;
+% 
+% phyParams.distance = 0.5;
+% phyParams.volume = 100;
+% 
+% phyParams.txAngle = 0;
+% phyParams.rxAngle = 0;
+% 
+% phyParams.blocked = 0;
+% phyParams.blockerType = "none";
+% 
+% phyParams.reflectionMode = "direct";
+% 
+% phyParams.modscheme = modScheme;
+% phyParams.useCoding = useCoding;
+% 
+% phyParams.notes = "clear_los";
+
+log_physical_results( ...
+    'physical_results.csv', ...
+    phyParams, ...
+    actualBER, ...
+    actualSER, ...
+    snr_est, ...
+    R_b);
