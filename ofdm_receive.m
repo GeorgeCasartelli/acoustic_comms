@@ -153,6 +153,8 @@ pilotSym = pskmod(0,M,pi/4);
 pilots = repmat(pilotSym, length(pilotIdx), nDataSyms+1);
 nSyms = size(pilots, 2);
 
+
+%% --== EQUALISE FROM PILOTS ==-- 
 x1_equalised = zeros(length(dataIdx), nDataSyms);
 for sym = 1:nDataSyms
     H_pilots = rxPilots(:, sym+1) ./ pilots(:, sym+1); % channel estimate at the pilot
@@ -260,14 +262,14 @@ cdScope(validSyms(:));
 [R_b] = data_rate_calc(fs, nfft, cplen, length(dataIdx), 0.5, k);
 
 %% --== SNR ESTIMATION ==--
-% Calculate SNR based on the deviation of received pilots from the ideal pilot symbol
+% calc SNR based on the deviation of received pilots from the ideal pilot symbol
 errors  = rxPilots - pilotSym;
 P_sig   = mean(abs(rxPilots(:)).^2);
 P_noise = mean(abs(errors(:)).^2);
 
-% Avoid log of zero
-if P_noise == 0; P_noise = 1e-10; end
 snr_est = 10 * log10(P_sig / P_noise);
+if P_noise == 0; P_noise = 1e-10; end
+
 
 %% --== RECONSTRUCT IDEAL SYMBOLS  ==--
 
@@ -317,6 +319,7 @@ totalSymbols = numel(rxTest);
 actualSER = totalSymbolErrors / totalSymbols;
 
 fprintf('Symbol Error Rate (SER): %.6f\n', actualSER);
+
 %% --== DASHBOARD ==--
 
 display_ofdm_dashboard(rx, fs, start, recoveredLen, headerSize, dataIdx, k, ...
