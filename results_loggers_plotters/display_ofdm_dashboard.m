@@ -1,7 +1,7 @@
 function display_ofdm_dashboard(rx, fs, start, recoveredLen, headerSize, dataIdx, k, ...
     fc, numActiveCarriers, H_interp, rxPilots, pilotSym, pilotIdx, nfft, cplen, ...
     useCoding, useInterleaving, txMode, actualBER, R_b, modScheme, snr_est, ...
-    constraintLength, serPerSubcarrier)
+    constraintLength, serPerSubcarrier, eqSymbols, recoveredImg)
     %% -- Initial Setup --
     symbolLen = nfft + cplen;
     bw_theory = (numActiveCarriers * fs) / nfft;
@@ -44,41 +44,87 @@ function display_ofdm_dashboard(rx, fs, start, recoveredLen, headerSize, dataIdx
     patch([f_start f_end f_end f_start], [min(ylim) min(ylim) max(ylim) max(ylim)], accent1, 'FaceAlpha', 0.05, 'EdgeColor', 'none');
     title('Passband PSD'); ylabel('dB/Hz'); xlabel('kHz'); grid on;
 
-    %% 3. CHANNEL RESPONSE (Denoised Magnitude)
+    %% 3. CONSTELLATION DIAGRAM
     ax3 = subplot(2, 3, 3); styleAx(ax3);
-    h_time = ifft(H_interp);
-    h_clean = zeros(size(h_time));
-    h_clean(1:min(cplen, length(h_time))) = h_time(1:min(cplen, length(h_time))); 
-    H_smooth = fft(h_clean);
-    dataFreqs = (dataIdx - nfft/2) * (fs/nfft) / 1000 + fc/1000;
     
-    area(dataFreqs, 20*log10(abs(H_smooth)), -100, 'FaceColor', accent3, 'FaceAlpha', 0.1, 'EdgeColor', accent3, 'LineWidth', 1.5);
-    title('Denoised Channel $|H(f)|$'); ylabel('Gain (dB)'); xlabel('kHz');
-    ylim([mean(20*log10(abs(H_smooth)))-15, mean(20*log10(abs(H_smooth)))+5]); grid on;
+    scatter(real(eqSymbols), imag(eqSymbols), 4, accent1, 'filled', 'MarkerFaceAlpha', 0.3);
+    hold on;
+    
+    % Ideal QPSK reference points
+    
+    if strcmp(modScheme, 'qpsk')
+        idealConst = (1/sqrt(2)) * [1+1j, 1-1j, -1+1j, -1-1j];
+    elseif strcmp(modScheme, '16qam')
+        idealConst = qammod((0:15), 16, 'UnitAveragePower', true);
+    end
+    scatter(real(idealConst), imag(idealConst), 80, accent4, 'x', 'LineWidth', 2);
 
+    
+    % Decision boundary lines
+    xline(0, '--', 'Color', gridCol, 'LineWidth', 1);
+    yline(0, '--', 'Color', gridCol, 'LineWidth', 1);
+    
+    axis equal; grid on;
+    xlim([-2 2]); ylim([-2 2]);
+    title('Constellation Diagram');
+    xlabel('In-Phase'); ylabel('Quadrature');
+    legend('Rx Symbols', sprintf('Ideal %s', upper(modScheme)), 'Location', 'best', 'FontSize', 7);
     %% 4. IMPULSE RESPONSE (Multipath Profile)
     ax4 = subplot(2, 3, 4); styleAx(ax4);
-    ir_est = abs(ifft(H_interp, 256));
-    stem((0:127)/fs*1e6, ir_est(1:128), 'Color', accent2, 'Marker', '.', 'LineWidth', 0.5);
-    title('Channel Impulse Response'); ylabel('Mag'); xlabel('\mus'); grid on;
+    dataFreqs = (dataIdx - nfft/2) * (fs/nfft) / 1000 + fc/1000;
+        
+    
+    % To see 50ms at 48kHz, we need ~2400 samples. 
+    % We'll use a 4096-point IFFT for high resolution.
+    n_ifft_deep = 4096; 
+    ir_est = abs(ifft(H_interp, n_ifft_deep));
+    
+    % Calculate how many samples represent 50ms
+    ms_to_see = 50;
+    samples_to_plot = round((ms_to_see/1000) * fs);
+    
+    % Ensure we don't exceed the IFFT size
+    samples_to_plot = min(samples_to_plot, n_ifft_deep);
+    
+    t_axis_ms = (0:samples_to_plot-1) / fs * 1000;
+    
+    % Using 'plot' instead of 'stem' for long windows makes it much easier to read
+    plot(t_axis_ms, ir_est(1:samples_to_plot), 'Color', accent2, 'LineWidth', 1);
+    
+    title(['Room Impulse Response (', num2str(ms_to_see), 'ms)']); 
+    ylabel('Mag'); xlabel('Time (ms)');
+    grid on; xlim([0 ms_to_see]);    
+    %% 5. SER / IMAGE
 
-    %% 5. ERROR DISTRIBUTION (Where the ICI hides)
     ax5 = subplot(2, 3, 5); styleAx(ax5);
-    % We use a bar plot for errors to see specific "trouble" subcarriers
-    bar(dataFreqs, serPerSubcarrier, 'FaceColor', accent4, 'EdgeColor', 'none', 'BarWidth', 1);
-    title('Spectral Error Density'); ylabel('SER'); xlabel('kHz');
-    ylim([0 1]); grid on;
-    % Add a line for average BER for comparison
-    yline(actualBER, '--', 'Color', [0.3 0.3 0.3], 'Alpha', 0.5);
+    
+    if strcmp(txMode, 'image')
+        imshow(recoveredImg, 'Parent', ax5);
+        title('Recovered Image');
+    else
+        bar(dataFreqs, serPerSubcarrier, 'FaceColor', accent4, 'EdgeColor', 'none', 'BarWidth', 1);
+        title('Symbol Error Rate per Subcarrier'); ylabel('SER'); xlabel('kHz');
+        ylim([0 1]); grid on;
+        yline(actualBER, '--', 'Color', [0.3 0.3 0.3], 'Alpha', 0.5);
+    end
 
     %% 6. SYSTEM METRICS PANEL
+    %% 6. SYSTEM METRICS PANEL
     ax6 = subplot(2, 3, 6); set(ax6, 'Color', bgCol); axis off;
+    
+    % Logic to determine what to show for coding
+    if useCoding
+        codingStr = sprintf('K=%d, r=1/2', constraintLength);
+    else
+        codingStr = 'None (Uncoded)';
+    end
+
     metrics = {
         '⚡ Rate',       sprintf('%.2f kbps', R_b/1000);
         '📡 Bandwidth',  sprintf('%.0f Hz', bw_theory);
         '📶 Est. SNR',   sprintf('%.2f dB', snr_est);
-        '🧩 Coding',     sprintf('ConstraintLength=%d, r=1/2', constraintLength); % Assuming you pass constraintLength
-        '📦 Mod',        modScheme;
+        '🧩 FEC',        codingStr;  % Now dynamically updated
+        '📦 Mod',        upper(modScheme);
         '❌ Final BER',  sprintf('%.5f', actualBER)
     };
     
