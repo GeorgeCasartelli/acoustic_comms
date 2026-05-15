@@ -12,6 +12,8 @@ function out = ternary(cond, a, b)
     if cond; out = a; else; out = b; end
 end
 
+addpath("results_loggers_plotters");
+
 %% --== DEFINE SCRIPT PARAMS ==--
 
 useCoding = true;
@@ -260,12 +262,12 @@ cdScope(validSyms(:));
 [R_b] = data_rate_calc(fs, nfft, cplen, length(dataIdx), 0.5, k);
 
 %% --== SNR ESTIMATION ==--
-% Calculate SNR based on the deviation of received pilots from the ideal pilot symbol
+% pilot deviation based SNR
 errors  = rxPilots - pilotSym;
 P_sig   = mean(abs(rxPilots(:)).^2);
 P_noise = mean(abs(errors(:)).^2);
 
-% Avoid log of zero
+% stop 0 getting through
 if P_noise == 0; P_noise = 1e-10; end
 snr_est = 10 * log10(P_sig / P_noise);
 
@@ -317,6 +319,7 @@ totalSymbols = numel(rxTest);
 actualSER = totalSymbolErrors / totalSymbols;
 
 fprintf('Symbol Error Rate (SER): %.6f\n', actualSER);
+
 %% --== DASHBOARD ==--
 
 display_ofdm_dashboard(rx, fs, start, recoveredLen, headerSize, dataIdx, k, ...
