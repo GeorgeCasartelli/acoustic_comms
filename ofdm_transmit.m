@@ -10,10 +10,11 @@ MUST BE MATCHED WITH ofdm_receive.m
 %% --== DEFINE SCRIPT PARAMS ==--
 
 useCoding = true;
-txMode = 'text';
-useInterleaving = true;
+txMode = 'image';
+useInterleaving = false;
 modScheme = "qpsk";
 
+addpath("results_loggers_plotters");
 
 %% --== DEFINE SIGNAL PARAMS ==--
 
@@ -122,8 +123,16 @@ inputSymbols = bi2de(bitgroups, 'left-msb'); % conv to int
 
 
 % PREAMBLE
-preamble = mod(0:numActiveCarriers-1, 4).'; % length of carriers, makes one symbol
-preambleSignal = pskmod(preamble, M, pi/4);
+rng(42);
+
+% preamble = mod(0:numActiveCarriers-1, 4).'; % length of carriers, makes one symbol
+preamble = randi([0 M-1], numActiveCarriers, 1);
+
+if strcmp(modScheme, "qpsk")
+    preambleSignal = pskmod(preamble, M, pi/4);
+elseif strcmp(modScheme, "16qam")
+    preambleSignal = qammod(preamble, M, "UnitAveragePower", true);
+end
 
 % MODULATE
 if strcmp(modScheme, "qpsk")
@@ -142,7 +151,12 @@ modSigFull = [preambleData, modSignal];
 %% --== TX - OFDM ==--
 
 % DEFINE PILOTS
-pilots = repmat(pskmod(0,M,pi/4),length(pilotIdx),nFrames+1);
+
+if strcmp(modScheme, "qpsk")
+    pilots = repmat(pskmod(0,M,pi/4),length(pilotIdx),nFrames+1);
+elseif strcmp(modScheme, "16qam")
+    pilots = repmat(qammod(0, M, "UnitAveragePower", true),length(pilotIdx),nFrames+1);
+end
 
 
 
@@ -184,7 +198,8 @@ silence = zeros(silenceSamples, 1);
 t = (0:length(tx_bb)-1)'/fs;
 
 txPassband = real(tx_bb .* exp(1j*2*pi*fc*t));
-txPassband = txPassband / max(abs(txPassband)) * 0.9;
+% txPassband = txPassband / max(abs(txPassband)) * 0.9;
+txPassband = txPassband / max(abs(txPassband));
 txPassband = [ txPassband ]; % not necessarily needed
 
 % signal = awgn(txPassband, 50); % awgn if wanted
