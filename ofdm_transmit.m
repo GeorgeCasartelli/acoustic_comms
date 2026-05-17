@@ -123,10 +123,9 @@ inputSymbols = bi2de(bitgroups, 'left-msb'); % conv to int
 
 
 % PREAMBLE
-rng(42);
 
-% preamble = mod(0:numActiveCarriers-1, 4).'; % length of carriers, makes one symbol
-preamble = randi([0 M-1], numActiveCarriers, 1);
+
+preamble = mod(0:numActiveCarriers-1, 4).'; % length of carriers, makes one symbol
 
 if strcmp(modScheme, "qpsk")
     preambleSignal = pskmod(preamble, M, pi/4);
