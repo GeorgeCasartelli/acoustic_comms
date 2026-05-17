@@ -164,30 +164,6 @@ symbolLen = nfft + cplen;
 numSymbolsReceived = floor(length(rxAligned) / symbolLen);
 rxTrimmed = rxAligned(1 : numSymbolsReceived * symbolLen);
 
-%% Plot Correlation Statistic (Synchronization Diagnostic)
-figure('Name', 'Receiver Synchronization');
-hold on; grid on;
-
-% We only care about the magnitude of the correlation
-correlationMag = abs(xc);
-
-% Plot the full correlation result
-plot(lags / fs * 1000, correlationMag, 'Color', [0 0.45 0.74], 'LineWidth', 1.5);
-
-% Mark the detected peak with a hollow circle (consistent with your style!)
-[maxVal, maxIdx] = max(correlationMag);
-peakLag = lags(maxIdx) / fs * 1000; % Convert to ms
-plot(peakLag, maxVal, 'ro', 'MarkerSize', 10, 'LineWidth', 2, 'DisplayName', 'Detected Start');
-
-% Formatting
-title('Synchronization: Cross-Correlation Statistic');
-xlabel('Time Lag (ms)');
-ylabel('Correlation Magnitude');
-legend('Correlation Result', 'Detected Sync Point');
-
-% Zoom in on the area around the peak for the report
-xlim([peakLag - 10, peakLag + 10]);
-
 %% --== OFDM DEMOD ==--
 [x1, rxPilots] = ofdmdemod(rxTrimmed, nfft, cplen, 0, nullIdx, pilotIdx);
 rxPreamble = x1(:, 1); % get first symbol (preamble) 
