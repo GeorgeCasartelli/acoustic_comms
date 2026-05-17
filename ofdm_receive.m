@@ -115,12 +115,8 @@ rx = getaudiodata(recorder);
 % [rx, fs] = audioread("ofdm_signal.wav");
 
 %% --== RX ==--
-rng(42); 
 
-% Generate a random integer sequence for the preamble
-preamble = randi([0 M-1], numActiveCarriers, 1);
-
-% preamble = mod(0:numActiveCarriers-1, M).';
+preamble = mod(0:numActiveCarriers-1, M).';
 if strcmp(modScheme, "qpsk")
     preambleSignal = pskmod(preamble, M, pi/4);
 elseif strcmp(modScheme, "16qam")
